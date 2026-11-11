@@ -14,9 +14,11 @@ from itertools import count
 import streamlit as st
 from PIL import Image
 
-try:  # carrega ANTHROPIC_API_KEY de um arquivo .env, se existir
+try:  # carrega ANTHROPIC_API_KEY e DATABASE_URL do arquivo .env do projeto, se existir
+    from pathlib import Path
+
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(Path(__file__).with_name(".env"))
 except ImportError:
     pass
 
@@ -42,12 +44,17 @@ NOTA_NOMES = "Os nomes de lojas, hubs e canais foram embaralhados na origem dos 
 _n_cartao = count()  # chave única por cartão: é por ela que o CSS encontra o cartão
 
 
-@st.cache_resource(show_spinner="Preparando os dados…")
+@st.cache_resource(show_spinner="Conectando ao banco e preparando os dados…")
 def conexao():
-    return db.criar_conexao()
+    return db.abrir()
 
 
-con = conexao()
+try:
+    con, origem = conexao()
+except Exception as erro:  # banco fora do ar, senha errada, tabelas faltando...
+    st.html(ui.vazio("Não consegui ler o banco de dados",
+                     f"{type(erro).__name__}: {erro}. Confira DATABASE_URL e se o MySQL está ligado."))
+    st.stop()
 
 
 @st.cache_data
@@ -84,7 +91,8 @@ with c_nav:
     pagina = st.segmented_control("Navegação", ["Painel", "Perguntar"], label_visibility="collapsed",
                                   default="Perguntar" if pergunta_do_link else "Painel", key="pagina") or "Painel"
 with c_pilulas:
-    html(ui.pilulas([(FONTE_DADOS["pilula"], False)] + ([] if com_ia else [("Modo demonstração", True)])))
+    html(ui.pilulas([(origem.descricao if origem.tipo == "mysql" else FONTE_DADOS["pilula"], False)]
+                    + ([] if com_ia else [("Modo demonstração", True)])))
 html('<hr class="pr-filete">')
 
 
@@ -328,6 +336,27 @@ def painel():
                              (aba_resumo, aba_demanda, aba_canais, aba_entrega)):
         with aba:
             desenhar(f, k)
+    banco_conectado()
+
+
+def banco_conectado():
+    """Resultado da varredura do banco: o que existe, quanto tem, e se o acesso é só de leitura."""
+    v = origem.varredura
+    if v is None:
+        return
+    with caixa():
+        estado = ("Usuário só de leitura: a Prova Real não consegue alterar nada neste banco."
+                  if v.somente_leitura else
+                  f"Atenção: o usuário tem permissão de escrita ({', '.join(v.privilegios)}). "
+                  "Use um usuário só com SELECT.")
+        html(ui.cartao_titulo(f"Banco conectado: {v.endereco}",
+                              f"{len(v.tabelas)} tabelas encontradas · {numero(v.pedidos)} pedidos lidos"))
+        tab = v.tabelas.assign(linhas=v.tabelas.linhas.map(numero),
+                               esperada=v.tabelas.esperada.map({True: "Sim", False: "Não"}))
+        tab.columns = ["Tabela", "Linhas", "Colunas", "Usada no painel"]
+        st.dataframe(tab, hide_index=True, width="stretch")
+        html(ui.nota(estado + " Os dados são copiados para uma camada de análise em memória ao abrir a página; "
+                     "o painel e o assistente nunca consultam o MySQL diretamente."))
 
 
 # -------------------------------- assistente --------------------------------

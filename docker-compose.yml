@@ -1,0 +1,25 @@
+# MySQL local que faz o papel do banco operacional da empresa.
+#   docker compose up -d
+# As senhas abaixo são só para este ambiente de desenvolvimento, na sua máquina.
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: prova-real-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: raiz_local_dev
+      MYSQL_DATABASE: delivery_center
+      MYSQL_USER: carga                    # escreve: usado só pelo script de carga
+      MYSQL_PASSWORD: carga_local_dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./docker/mysql:/docker-entrypoint-initdb.d:ro
+      - dados_mysql:/var/lib/mysql
+    healthcheck:
+      # pela porta TCP: durante a inicialização o MySQL roda sem rede, então só fica "saudável" no fim
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-praiz_local_dev"]
+      interval: 5s
+      retries: 20
+
+volumes:
+  dados_mysql:

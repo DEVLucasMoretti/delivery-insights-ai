@@ -8,6 +8,21 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    services:
+      mysql:  # banco de teste: o teste de integração carrega uma amostra e lê com usuário só de leitura
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: raiz_ci
+          MYSQL_DATABASE: delivery_center
+          MYSQL_USER: carga
+          MYSQL_PASSWORD: carga_ci
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -praiz_ci"
+          --health-interval=5s --health-retries=20
+    env:
+      TESTE_MYSQL_CARGA_URL: mysql+pymysql://carga:carga_ci@127.0.0.1:3306/delivery_center
+      TESTE_MYSQL_LEITURA_URL: mysql+pymysql://prova_leitura:leitura_ci@127.0.0.1:3306/delivery_center
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,4 +30,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: pytest -q
+      - name: Cria o usuário só de leitura
+        run: >-
+          mysql -h 127.0.0.1 -uroot -praiz_ci -e
+          "CREATE USER 'prova_leitura'@'%' IDENTIFIED BY 'leitura_ci';
+          GRANT SELECT, SHOW VIEW ON delivery_center.* TO 'prova_leitura'@'%';"
+      - run: pytest -q -rs

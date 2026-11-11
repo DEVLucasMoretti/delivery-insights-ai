@@ -185,19 +185,45 @@ Não existem dados de clientes, itens do pedido, avaliações nem prazo prometid
 """.strip()
 
 
+def _montar(con: duckdb.DuckDBPyConnection, origem) -> duckdb.DuckDBPyConnection:
+    """Aplica a mesma limpeza a qualquer origem e tranca o banco. `origem(nome)` devolve o SQL da tabela crua."""
+    for nome, sql in _sql_tabelas(origem).items():
+        con.execute(f"CREATE TABLE {nome} AS {sql}")
+    con.execute(VIEW_PEDIDOS)
+    con.execute("SET enable_external_access = false")
+    con.execute("SET lock_configuration = true")
+    return con
+
+
+def ler_csv_brutos(pasta: Path) -> dict:
+    """Lê os 7 CSV com os tipos que o DuckDB deteta (datas viram TIMESTAMP). Usado para carregar o MySQL."""
+    base = Path(pasta).resolve().as_posix().replace("'", "''")
+    con = duckdb.connect(":memory:")
+    return {n: con.execute(f"SELECT * FROM read_csv('{base}/{n}.csv', encoding='latin-1', sample_size=-1)").df()
+            for n in ARQUIVOS}
+
+
 def criar_conexao(pasta: Path | None = None, baixar_se_faltar: bool = True) -> duckdb.DuckDBPyConnection:
-    """Cria o banco em memória a partir dos CSV e tranca o acesso a arquivos e rede."""
+    """Cria o banco analítico em memória a partir dos CSV."""
     pasta = Path(pasta or PASTA_PADRAO)
     if not arquivos_presentes(pasta):
         if not baixar_se_faltar:
             raise FileNotFoundError(f"CSV do Delivery Center não encontrados em {pasta}. Baixe de {PAGINA}")
         baixar(pasta)
     base = pasta.resolve().as_posix().replace("'", "''")
-    csv = lambda nome: f"read_csv('{base}/{nome}.csv', encoding='latin-1', sample_size=-1)"  # noqa: E731
+    return _montar(duckdb.connect(":memory:"),
+                   lambda nome: f"read_csv('{base}/{nome}.csv', encoding='latin-1', sample_size=-1)")
+
+
+def criar_conexao_de_tabelas(brutas: dict) -> duckdb.DuckDBPyConnection:
+    """Cria o banco analítico a partir de tabelas já lidas de outro sistema (ex.: o MySQL da operação)."""
+    faltam = [n for n in ARQUIVOS if n not in brutas]
+    if faltam:
+        raise ValueError(f"Faltam as tabelas: {', '.join(faltam)}")
     con = duckdb.connect(":memory:")
-    for nome, sql in _sql_tabelas(csv).items():
-        con.execute(f"CREATE TABLE {nome} AS {sql}")
-    con.execute(VIEW_PEDIDOS)
-    con.execute("SET enable_external_access = false")
-    con.execute("SET lock_configuration = true")
+    for nome in ARQUIVOS:
+        con.register(f"bruto_{nome}", brutas[nome])
+    _montar(con, lambda nome: f"bruto_{nome}")
+    for nome in ARQUIVOS:  # os DataFrames saem da conexão: só ficam as tabelas limpas
+        con.unregister(f"bruto_{nome}")
     return con

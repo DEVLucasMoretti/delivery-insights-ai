@@ -7,3 +7,6 @@ anthropic>=2.8
 python-dotenv>=1.0
 fastapi>=0.115
 uvicorn>=0.30
+pymysql>=1.1
+sqlalchemy>=2.0.42
+cryptography>=42

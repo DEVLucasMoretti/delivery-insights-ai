@@ -17,7 +17,8 @@ Prova Real é um painel de delivery com um assistente que responde a perguntas d
 |---|---|
 | **Pergunta livre** | Um agente (Claude, com *tool use*) escreve o SQL, executa, lê o erro e corrige sozinho, e pode criar um gráfico |
 | **Conta à vista** | Cada resposta traz o SQL executado e a tabela que voltou |
-| **Somente leitura** | Duas camadas de proteção: validador de SQL e banco sem acesso a arquivos nem à rede |
+| **Liga no banco da empresa** | Conecta num MySQL, faz a varredura das tabelas e das permissões, e monta o painel a partir daí |
+| **Somente leitura** | Três camadas: usuário do MySQL só com `SELECT`, validador de SQL e banco de análise sem acesso a arquivos nem à rede |
 | **Avaliação** | 18 perguntas com SQL de referência para medir a taxa de acerto, incluindo duas a que o agente deve recusar responder |
 
 ## O painel
@@ -75,10 +76,38 @@ Na primeira execução o projeto baixa os dados do Kaggle (cerca de 29 MB) e gua
 **Para ligar o agente**, copie `.env.example` para `.env` e preencha `ANTHROPIC_API_KEY`. Sem chave, tudo funciona, com o assistente em modo demonstração.
 
 ```bash
-pytest                      # 52 testes, sem internet (usam uma amostra própria)
+pytest                      # 56 testes, sem internet (usam uma amostra própria)
 uvicorn api:app --reload    # API em http://localhost:8000/docs
 python -m evals.run_evals   # avaliação do agente (precisa da chave; tem custo de API)
 ```
+
+## Ligar num banco MySQL
+
+Numa empresa, os pedidos não ficam em arquivos: ficam no banco de dados da operação. A Prova Real se conecta nesse banco, descobre o que existe nele e monta o painel e o assistente a partir dos dados de lá.
+
+```mermaid
+flowchart LR
+    M[(MySQL da operação<br/>pedidos, entregas, lojas...)] -- usuário só de leitura --> V[Varredura<br/>tabelas · linhas · permissões]
+    V --> C[Cópia e limpeza]
+    C --> D[(Camada de análise<br/>DuckDB em memória)]
+    D --> P[Painel]
+    D --> A[Assistente]
+```
+
+1. **Varredura:** lê o catálogo do banco (`information_schema`): que tabelas existem, quantas linhas e colunas têm, e que permissões o usuário tem. Se o usuário puder escrever, a tela avisa.
+2. **Cópia:** lê as 7 tabelas da operação e aplica a mesma limpeza da versão com arquivos.
+3. **Análise:** painel e assistente consultam a cópia em memória, **nunca o MySQL diretamente**. É o padrão em empresas: análise pesada não roda no banco que atende os pedidos em tempo real.
+
+Para testar na sua máquina, com Docker:
+
+```bash
+docker compose up -d                 # sobe um MySQL local, já com o usuário só de leitura
+cp .env.example .env                 # e descomente DATABASE_URL e MYSQL_CARGA_URL
+python scripts/carregar_mysql.py     # carrega o conjunto Delivery Center no MySQL
+streamlit run app.py                 # agora o cabeçalho mostra "MySQL · delivery_center"
+```
+
+O fim do painel mostra o resultado da varredura. Para apontar para outro banco, basta trocar `DATABASE_URL`; o banco precisa ter as mesmas 7 tabelas do conjunto. No GitHub Actions, um teste sobe um MySQL de verdade, carrega uma amostra, confere que o usuário de leitura não consegue apagar nada e que os números batem com a versão em arquivos.
 
 ## Os dados e os limites
 
@@ -113,6 +142,8 @@ Dar a um modelo de linguagem acesso a um banco de dados exige cuidado. Há duas 
 1. **Validador de SQL** ([`sql_guard.py`](delivery_insights/sql_guard.py)): aceita apenas uma instrução, que comece por `SELECT` ou `WITH`, sem comandos de escrita, de leitura de arquivos ou de configuração. Todo resultado é limitado a 200 linhas.
 2. **Banco trancado**: depois de carregar os dados, a conexão DuckDB fica com `enable_external_access = false` e configuração bloqueada. Mesmo que algo passe pelo validador, o banco não lê arquivos nem acessa a rede.
 
+Quando os dados vêm do MySQL, há uma terceira camada antes destas: o usuário do banco só tem permissão de `SELECT`, e a tela avisa se não for assim.
+
 Há ainda limite de tempo por consulta, limite de voltas do agente, limite de perguntas por sessão e a chave de API fica fora do repositório. Os testes em [`test_sql_guard.py`](tests/test_sql_guard.py) tentam 17 formas de fugir a essas regras.
 
 ## Avaliação do agente
@@ -133,7 +164,7 @@ Devolve a resposta em texto, o modo (`llm` ou `demo`) e as consultas SQL com as 
 
 ## Stack
 
-Python, SQL, DuckDB, Streamlit, Plotly, SDK da Anthropic (Claude), FastAPI, pytest e GitHub Actions.
+Python, SQL, MySQL, DuckDB, Docker, Streamlit, Plotly, SDK da Anthropic (Claude), FastAPI, pytest e GitHub Actions.
 
 ## Decisões e limitações
 
@@ -150,7 +181,8 @@ app.py                      Painel e assistente (Streamlit)
 api.py                      API REST (FastAPI)
 delivery_insights/
   delivery_center.py        Download, limpeza e carga do conjunto público
-  db.py                     Consulta interna e consulta segura do agente
+  mysql_fonte.py            Conexão, varredura e leitura do MySQL
+  db.py                     Escolhe a origem (MySQL ou CSV) e consulta com segurança
   sql_guard.py              Validador de SQL somente leitura
   metrics.py                Métricas de negócio em SQL
   charts.py                 Gráficos Plotly
@@ -158,7 +190,9 @@ delivery_insights/
   agent.py                  Agente (tool use, text-to-SQL)
   demo.py                   Modo demonstração sem modelo de linguagem
 evals/                      Perguntas com resposta de referência e corretor
-tests/                      52 testes (pytest)
+tests/                      56 testes (pytest), um deles com MySQL de verdade no CI
+scripts/carregar_mysql.py   Carrega o conjunto num MySQL
+docker-compose.yml          MySQL local com usuário só de leitura
 scripts/capturar_telas.py   Regenera as imagens deste README
 ```
 
