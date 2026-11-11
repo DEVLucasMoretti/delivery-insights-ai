@@ -2,17 +2,17 @@
 
 Como funciona, em quatro passos:
 
-1. a pergunta do utilizador vai para o Claude junto com o esquema das tabelas e
+1. a pergunta do usuário vai para o Claude junto com o esquema das tabelas e
    as definições das métricas (prompt de sistema);
 2. o modelo decide que consulta fazer e chama a ferramenta `executar_sql`
    (tool use / function calling);
-3. o SQL passa pelos guardrails (só leitura, limite de linhas e de tempo), corre
+3. o SQL passa pelas proteções (só leitura, limite de linhas e de tempo), corre
    no DuckDB e o resultado volta para o modelo. Se der erro, o modelo recebe a
    mensagem de erro e corrige a consulta sozinho;
 4. o ciclo repete até o modelo ter dados suficientes para responder.
 
 Tudo o que o agente fez (SQL, tabelas, gráficos, tokens, tempo) fica registado
-em `Resposta.passos`, para a interface mostrar ao utilizador: nada de caixa preta.
+em `Resposta.passos`, para a interface mostrar ao usuário: nada de caixa preta.
 """
 
 from __future__ import annotations
@@ -30,25 +30,29 @@ MODELO = os.getenv("DELIVERY_AI_MODEL", "claude-opus-5-5")
 MAX_VOLTAS = 8
 LINHAS_PARA_O_MODELO = 60
 
-PROMPT_SISTEMA = f"""Você é o analista de dados de um marketplace brasileiro de delivery de comida. \
-Quem pergunta são pessoas de negócio (operações, marketing, comercial) que não escrevem SQL e \
-precisam de respostas em que possam confiar para tomar decisões.
+PROMPT_SISTEMA = f"""Você é o analista de dados de uma operação brasileira de delivery que liga lojas \
+de shoppings a marketplaces e entrega comida e produtos a partir de hubs. Quem pergunta são pessoas de \
+negócio (operações, logística, comercial) que não escrevem SQL e precisam de respostas em que possam \
+confiar para tomar decisões.
 
-Os dados são SINTÉTICOS (gerados por simulação para um projeto de portfólio) e cobrem o ano de 2025. \
-Estão num banco DuckDB com o esquema abaixo.
+Os dados vêm do conjunto público "Delivery Center: Food & Goods orders in Brazil" (Kaggle), publicado pela \
+própria empresa. Cobrem janeiro a abril de 2021 em quatro cidades. Segundo a descrição do conjunto, ele \
+representa a operação de forma fictícia, não é completo e foi parcialmente anonimizado: os nomes de lojas, \
+hubs e canais estão embaralhados. Estão num banco DuckDB com o esquema abaixo.
 
 <esquema>
 {db.ESQUEMA}
 </esquema>
 
 <definicoes_de_metricas>
-- GMV = soma de valor_total dos pedidos entregues (entregue = TRUE).
-- Ticket médio = GMV / número de pedidos entregues.
-- Take rate = soma de receita_plataforma / GMV.
+- Vendas (GMV) = soma de valor dos pedidos finalizados (finalizado = TRUE).
+- Ticket médio = média de valor dos pedidos finalizados.
 - Taxa de cancelamento = pedidos cancelados / total de pedidos feitos.
-- No prazo (SLA) = pedidos entregues com tempo_entrega_min <= tempo_prometido_min; use a coluna no_prazo.
-- Clientes ativos = clientes distintos com pelo menos um pedido no período.
-- Recompra = cliente que volta a pedir depois do primeiro pedido.
+- Tempo de entrega: use a MEDIANA de tempo_total_min (função median), não a média. Uma parte dos pedidos \
+fica aberta por horas e distorce a média. Diga que é mediana quando citar o número.
+- Em até 60 min = pedidos finalizados com tempo_total_min <= 60 / pedidos finalizados com tempo_total_min.
+- Frete coberto = soma de taxa_entrega / soma de custo_entrega, nos pedidos finalizados com custo_entrega.
+- Lojas ativas = lojas distintas com pelo menos um pedido no período.
 </definicoes_de_metricas>
 
 Como trabalhar:
@@ -57,13 +61,15 @@ executar_sql. Não estime de cabeça: quem lê vai agir com base no número.
 - Escreva SQL no dialeto DuckDB. O acesso é só de leitura e cada consulta devolve no máximo \
 {LINHAS_PARA_O_MODELO} linhas para você, por isso agregue (GROUP BY) em vez de pedir linhas cruas.
 - Se a consulta der erro, leia a mensagem, corrija e tente de novo.
+- Comida e Produtos se comportam de forma muito diferente (ticket, tempo, cancelamento). Ao analisar \
+tempo ou valor, separe por segmento ou diga qual está usando.
 - Perguntas do tipo "por quê" pedem investigação: quebre a métrica por dimensões \
-(cidade, culinária, hora, mês, faixa etária) até achar o que explica a diferença.
-- Ao comparar grupos, olhe o tamanho da amostra: um restaurante com 5 pedidos não sustenta conclusão.
+(cidade, segmento, hub, canal, hora, modal de entrega, distância) até achar o que explica a diferença.
+- Ao comparar grupos, olhe o tamanho da amostra: uma loja com 5 pedidos não sustenta conclusão.
 - Use criar_grafico quando uma imagem ajudar (ranking, evolução no tempo). Um gráfico por resposta basta.
 - Se a pergunta for ambígua, escolha a interpretação mais útil e diga qual foi. Se os dados não \
-permitem responder (por exemplo, não existem dados de entregadores, de itens do cardápio nem de \
-anos anteriores), diga isso claramente em vez de inventar.
+permitem responder (por exemplo, não existem clientes, itens do pedido, avaliações, prazo prometido \
+nem outros anos), diga isso claramente em vez de inventar.
 
 Como responder:
 - Em português do Brasil, direto: comece pela resposta, depois os números que a sustentam, e feche \
@@ -83,7 +89,7 @@ FERRAMENTAS = [
             "type": "object",
             "properties": {
                 "descricao": {"type": "string",
-                              "description": "Uma frase curta, para o utilizador, sobre o que esta consulta calcula."},
+                              "description": "Uma frase curta, para o usuário, sobre o que esta consulta calcula."},
                 "sql": {"type": "string", "description": "Uma única instrução SELECT/WITH em dialeto DuckDB."},
             },
             "required": ["descricao", "sql"],
@@ -93,7 +99,7 @@ FERRAMENTAS = [
     {
         "name": "criar_grafico",
         "description": (
-            "Mostra ao utilizador um gráfico construído a partir de uma consulta SQL. "
+            "Mostra ao usuário um gráfico construído a partir de uma consulta SQL. "
             "A consulta deve devolver poucas linhas já agregadas, com uma coluna para o eixo x "
             "(categoria ou data) e uma coluna numérica para o eixo y."
         ),
@@ -158,10 +164,10 @@ def _executar(con, nome: str, entrada: dict) -> tuple[str, bool, Passo]:
             df = db.consultar_seguro(con, sql)
             passo.resultado = df
             passo.figura = charts.do_agente(df, entrada["tipo"], entrada["x"], entrada["y"], entrada["titulo"])
-            return f"Gráfico mostrado ao utilizador ({len(df)} pontos).", False, passo
+            return f"Gráfico mostrado ao usuário ({len(df)} pontos).", False, passo
         raise ValueError(f"Ferramenta desconhecida: {nome}")
     except SqlBloqueado as e:
-        passo.erro = f"Consulta bloqueada pelos guardrails: {e}"
+        passo.erro = f"Consulta bloqueada pelas proteções: {e}"
     except Exception as e:  # erro de SQL, coluna inexistente, tempo esgotado...
         passo.erro = f"{type(e).__name__}: {e}"
     return passo.erro, True, passo

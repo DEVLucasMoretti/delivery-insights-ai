@@ -57,7 +57,7 @@ def pct(v: float, casas: int = 1) -> str:
 
 _FORMATOS = {
     "moeda": brl_curto, "pct": pct, "numero": numero,
-    "nota": lambda v: numero(v, 2), "minutos": lambda v: f"{numero(v)} min",
+    "minutos": lambda v: f"{numero(v)} min", "km": lambda v: f"{numero(v, 1)} km",
     "decimal": lambda v: numero(v, 2),
 }
 
@@ -182,66 +182,34 @@ def calor_hora_dia(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def calor_culinaria_faixa(df: pd.DataFrame) -> go.Figure:
-    m = df.pivot(index="culinaria", columns="faixa_etaria", values="participacao").fillna(0)
-    m = m.loc[m.mean(axis=1).sort_values(ascending=False).index]
-    texto = [[pct(v, 0) for v in linha] for linha in m.values]
-    fig = go.Figure(go.Heatmap(
-        z=m.values, x=m.columns, y=m.index, colorscale=ESCALA, xgap=3, ygap=3,
-        text=texto, texttemplate="%{text}", textfont=dict(size=12), showscale=False,
-        hovertemplate="%{y} · %{x}<br><b>%{text}</b> dos pedidos dessa faixa<extra></extra>"))
-    _base(fig, max(200, 34 * len(m) + 40))
-    fig.update_yaxes(autorange="reversed", showgrid=False, tickfont=dict(color=TINTA_2, size=13), ticksuffix="  ",
-                     tickmode="linear", dtick=1, ticks="")
-    fig.update_xaxes(type="category", ticksuffix=" anos", showline=False)
-    return fig
-
-
-def calor_coortes(df: pd.DataFrame) -> go.Figure:
-    d = df[df["mes_n"] >= 1]
-    m = d.pivot(index="coorte", columns="mes_n", values="retencao").sort_index()
-    rotulo_y = [f"{_MESES[c.month - 1]}/{str(c.year)[2:]}" for c in pd.to_datetime(m.index)]
-    texto = [["" if pd.isna(v) else pct(v, 0) for v in linha] for linha in m.values]
-    fig = go.Figure(go.Heatmap(
-        z=m.values, x=[f"Mês {int(c)}" for c in m.columns], y=rotulo_y, colorscale=ESCALA,
-        xgap=3, ygap=3, text=texto, texttemplate="%{text}", textfont=dict(size=11),
-        showscale=False, hoverongaps=False,
-        hovertemplate="Turma de %{y}<br>%{x} depois: <b>%{text}</b> voltaram a pedir<extra></extra>"))
-    _base(fig, max(200, 32 * len(m) + 40))
-    fig.update_yaxes(autorange="reversed", showgrid=False, type="category", tickmode="linear", dtick=1,
-                     ticks="", tickfont=dict(color=TINTA_2, size=12), ticksuffix="  ")
-    fig.update_xaxes(type="category", showline=False)
-    return fig
-
-
-def linha_sla(df: pd.DataFrame, media: float) -> go.Figure:
-    """% no prazo por hora; anota só o pior horário e a média do período."""
+def linha_hora(df: pd.DataFrame, coluna: str, referencia: float, formato: str = "minutos") -> go.Figure:
+    """Uma medida por hora do dia; anota só o pior horário (o mais alto) e a referência do período."""
+    fmt = _FORMATOS[formato]
+    rotulos = [fmt(v) for v in df[coluna]]
     fig = go.Figure(go.Scatter(
-        x=df["hora"], y=df["pct_no_prazo"], mode="lines", line=dict(color=PETROLEO, width=2),
-        customdata=df[["pedidos", "tempo_medio_min"]],
-        hovertemplate="%{x}h<br><b>%{y:.1%} no prazo</b><br>%{customdata[0]:,.0f} pedidos · "
-                      "%{customdata[1]:.0f} min em média<extra></extra>"))
+        x=df["hora"], y=df[coluna], mode="lines", line=dict(color=PETROLEO, width=2),
+        customdata=list(zip(rotulos, df["pedidos"])),
+        hovertemplate="%{x}h<br><b>%{customdata[0]}</b><br>%{customdata[1]:,.0f} pedidos<extra></extra>"))
     if len(df):
-        pior = df.loc[df["pct_no_prazo"].idxmin()]
+        pior = df.loc[df[coluna].idxmax()]
         fig.add_trace(go.Scatter(
-            x=[pior["hora"]], y=[pior["pct_no_prazo"]], mode="markers+text", hoverinfo="skip",
+            x=[pior["hora"]], y=[pior[coluna]], mode="markers+text", hoverinfo="skip",
             marker=dict(size=8, color=PETROLEO, line=dict(color="white", width=2)),
-            text=[f"<b>{pct(pior['pct_no_prazo'], 0)} às {int(pior['hora'])}h</b>"],
-            textposition="bottom center", textfont=dict(color=TINTA, size=12), cliponaxis=False))
-    if media is not None and not pd.isna(media):
-        fig.add_hline(y=media, line=dict(color=MUDO, width=1, dash="dot"),
-                      annotation_text=f"média {pct(media)}", annotation_position="top right",
+            text=[f"<b>{fmt(pior[coluna])} às {int(pior['hora'])}h</b>"],
+            textposition="top center", textfont=dict(color=TINTA, size=12), cliponaxis=False))
+    if referencia is not None and not pd.isna(referencia):
+        fig.add_hline(y=referencia, line=dict(color=MUDO, width=1, dash="dot"),
+                      annotation_text=f"período {fmt(referencia)}", annotation_position="bottom right",
                       annotation_font=dict(color=TINTA_2, size=11))
     _base(fig, 300)
-    fig.update_layout(margin=dict(l=0, r=24, t=8, b=0))
-    piso = max(0.0, float(df["pct_no_prazo"].min()) - 0.08) if len(df) else 0
-    fig.update_yaxes(tickformat=".0%", range=[piso, 1.02])
+    fig.update_layout(margin=dict(l=0, r=24, t=26, b=0))
+    fig.update_yaxes(rangemode="tozero", ticksuffix=" min" if formato == "minutos" else "")
     fig.update_xaxes(dtick=2, tick0=0, ticksuffix="h", range=[-0.6, 23.6])
     return fig
 
 
 def _e_fracao(nome: str, valores: pd.Series) -> bool:
-    pista = any(p in nome.lower() for p in ("pct", "taxa", "participacao", "percent", "share", "rate"))
+    pista = any(p in nome.lower() for p in ("pct", "taxa", "participacao", "percent", "share", "rate", "coberto"))
     return pista and len(valores) > 0 and valores.min() >= 0 and valores.max() <= 1
 
 

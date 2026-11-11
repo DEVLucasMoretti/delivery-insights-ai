@@ -53,20 +53,20 @@ def test_erro_de_sql_volta_para_o_modelo_corrigir(con):
     assert cliente.chamadas[1]["messages"][-1]["content"][0]["is_error"] is True
 
 
-def test_tentativa_de_escrita_e_bloqueada(con, tabelas):
+def test_tentativa_de_escrita_e_bloqueada(con, brutos):
     cliente = ClienteFalso(
         _msg("tool_use", _tool(1, "executar_sql", descricao="apagar", sql="DELETE FROM pedidos")),
         _msg("end_turn", NS(type="text", text="Não posso alterar dados.")),
     )
     r = agent.responder("apaga tudo", con, cliente=cliente)
     assert "bloqueada" in r.passos[0].erro
-    assert con.execute("SELECT count(*) FROM pedidos").fetchone()[0] == len(tabelas["pedidos"])
+    assert con.execute("SELECT count(*) FROM pedidos").fetchone()[0] == len(brutos["orders"])
 
 
 def test_grafico_e_historico_entre_perguntas(con):
     cliente = ClienteFalso(
         _msg("tool_use", _tool(1, "criar_grafico", titulo="GMV por cidade", tipo="barra", x="cidade", y="gmv",
-                               sql="SELECT cidade, sum(valor_total) AS gmv FROM v_pedidos GROUP BY 1")),
+                               sql="SELECT cidade, sum(valor) AS gmv FROM v_pedidos GROUP BY 1")),
         _msg("end_turn", NS(type="text", text="Veja o gráfico.")),
         _msg("end_turn", NS(type="text", text="Segunda resposta.")),
     )
@@ -93,6 +93,12 @@ def test_ferramentas_tem_esquema_estrito():
 def test_modo_demonstracao(con):
     for ex in demo.EXEMPLOS:
         r = demo.responder(ex.pergunta, con)
-        assert r.modo == "demo" and r.passos and len(r.texto) > 40
+        assert r.modo == "demo" and r.passos and len(r.texto) > 30
     assert demo.encontrar("qual o gmv de cada cidade") is demo.EXEMPLOS[0]
     assert "catálogo" in demo.responder("qual o salário dos entregadores?", con).texto
+
+
+def test_prompt_descreve_a_origem_dos_dados_sem_exagerar():
+    p = agent.PROMPT_SISTEMA
+    assert "Delivery Center" in p and "fictícia" in p and "anonimizado" in p
+    assert "sintétic" not in p.lower() and "v_pedidos" in p

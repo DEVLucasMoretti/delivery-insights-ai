@@ -30,115 +30,117 @@ class Exemplo:
 
 def _gmv_cidade(df):
     a, z = df.iloc[0], df.iloc[-1]
-    return (f"**{a.cidade}** lidera com {brl(a.gmv)} de GMV ({pct(a.participacao)} do total), "
+    return (f"**{a.cidade}** lidera com {brl(a.gmv)} em vendas ({pct(a.participacao)} do total), "
             f"seguida de {df.iloc[1].cidade} ({brl(df.iloc[1].gmv)}). "
             f"A menor praça é {z.cidade}, com {brl(z.gmv)}. "
             f"O ticket médio vai de {brl(df.ticket_medio.min(), 2)} a {brl(df.ticket_medio.max(), 2)}.")
 
 
-def _faixa(df):
-    linhas = [f"- **{r.faixa_etaria} anos:** {r.culinaria} ({pct(r.participacao)} dos pedidos da faixa)"
-              for r in df[df.posicao == 1].itertuples()]
-    return "A culinária preferida muda com a idade:\n" + "\n".join(linhas)
+def _segmento(df):
+    d = df.set_index("segmento")
+    c, p = d.loc["Comida"], d.loc["Produtos"]
+    return (f"**Produtos** demoram bem mais: {numero(p.tempo_mediano_min)} min de mediana, contra "
+            f"{numero(c.tempo_mediano_min)} min em comida. Só {pct(p.pct_ate_60)} dos pedidos de produtos "
+            f"terminam em até 60 minutos (comida: {pct(c.pct_ate_60)}), e o cancelamento é de "
+            f"{pct(p.taxa_cancelamento)} contra {pct(c.taxa_cancelamento)}. "
+            f"Comida é {pct(c.pedidos / (c.pedidos + p.pedidos))} dos pedidos.")
 
 
-def _sla(df):
-    pior = df.sort_values("pct_no_prazo").head(3)
-    horas = ", ".join(f"{int(r.hora)}h ({pct(r.pct_no_prazo)})" for r in pior.itertuples())
-    return (f"Os piores horários para o prazo são {horas}. "
-            f"No melhor horário, {pct(df.pct_no_prazo.max())} dos pedidos chegam no prazo. "
-            "Os atrasos se concentram nos picos de almoço e jantar: é onde reforçar a oferta de "
-            "entregadores ou alargar o prazo prometido traz mais retorno.")
+def _horario(df):
+    top = df.sort_values("pedidos", ascending=False).head(3)
+    horas = ", ".join(f"{int(r.hora)}h ({numero(r.pedidos)})" for r in top.itertuples())
+    almoco = df[df.hora.between(11, 14)].pedidos.sum() / df.pedidos.sum()
+    jantar = df[df.hora.between(18, 21)].pedidos.sum() / df.pedidos.sum()
+    return (f"Os horários mais cheios são {horas}. O almoço (11h às 14h) concentra {pct(almoco)} dos pedidos "
+            f"e o jantar (18h às 21h), {pct(jantar)}. Horário de Brasília.")
 
 
-def _cancel(df):
+def _canal(df):
+    d = df.set_index("tipo_canal")
+    m, p = d.loc["Marketplace"], d.loc["Canal próprio"]
+    return (f"O **canal próprio** tem ticket médio de {brl(p.ticket_medio, 2)}, contra {brl(m.ticket_medio, 2)} "
+            f"nos marketplaces. Mas os marketplaces trazem {pct(m.pedidos / (m.pedidos + p.pedidos))} dos pedidos "
+            f"e {pct(m.gmv / (m.gmv + p.gmv))} das vendas.")
+
+
+def _modal(df):
+    d = df.set_index("modal_entrega")
+    b, m = d.loc["Bicicleta"], d.loc["Moto"]
+    return (f"A bicicleta faz percursos mais curtos (mediana de {numero(b.distancia_mediana_km, 1)} km, contra "
+            f"{numero(m.distancia_mediana_km, 1)} km da moto) e o trânsito mediano é de "
+            f"{numero(b.transito_mediano_min, 1)} min, contra {numero(m.transito_mediano_min, 1)} min. "
+            f"A moto leva {pct(m.pedidos / (m.pedidos + b.pedidos))} das entregas. "
+            "A comparação não é de velocidade: cada modal recebe distâncias diferentes.")
+
+
+def _frete(df):
+    a, z = df.iloc[0], df.iloc[-1]
+    return (f"Em **{a.cidade}** a taxa cobrada cobre só {pct(a.frete_coberto)} do custo da entrega "
+            f"(taxa média de {brl(a.taxa_media, 2)} para um custo de {brl(a.custo_medio, 2)}). "
+            f"No outro extremo, {z.cidade} cobre {pct(z.frete_coberto)}.")
+
+
+def _distancia(df):
+    a, z = df.iloc[0], df.iloc[-1]
+    return (f"Sim. Até 1 km, o trânsito mediano é de {numero(a.transito_mediano_min, 1)} min; acima de 5 km, "
+            f"sobe para {numero(z.transito_mediano_min, 1)} min. "
+            f"{pct(df.pedidos.iloc[:2].sum() / df.pedidos.sum())} das entregas ficam em até 2 km.")
+
+
+def _hub_cancel(df):
     r = df.iloc[0]
-    return (f"Entre restaurantes com pelo menos 150 pedidos, o maior cancelamento é de "
-            f"**{r.restaurante}** ({r.culinaria}, {r.cidade}): {pct(r.taxa_cancelamento)} em "
-            f"{numero(r.pedidos)} pedidos, com entrega média de {numero(r.tempo_medio_min)} min. "
-            "A tabela lista os 10 primeiros.")
-
-
-def _ticket(df):
-    a, z = df.iloc[0], df.iloc[-1]
-    var = z.ticket_medio / a.ticket_medio - 1
-    return (f"O ticket médio foi de {brl(a.ticket_medio, 2)} em janeiro para {brl(z.ticket_medio, 2)} "
-            f"em dezembro ({'+' if var >= 0 else ''}{pct(var)}). No ano, variou entre "
-            f"{brl(df.ticket_medio.min(), 2)} e {brl(df.ticket_medio.max(), 2)}.")
-
-
-def _clube(df):
-    s = df[df.assinante_clube].iloc[0]
-    n = df[~df.assinante_clube].iloc[0]
-    return (f"Sim. Assinantes do clube fazem em média **{numero(s.pedidos_por_cliente, 1)} pedidos** no ano, "
-            f"contra {numero(n.pedidos_por_cliente, 1)} dos não assinantes, com ticket médio de "
-            f"{brl(s.ticket_medio, 2)} contra {brl(n.ticket_medio, 2)}. "
-            f"São {pct(s.clientes / (s.clientes + n.clientes))} dos clientes ativos.")
-
-
-def _atraso(df):
-    a, z = df.iloc[0], df.iloc[-1]
-    return (f"Sim, e muito. Pedidos entregues no prazo recebem nota média **{numero(a.avaliacao_media, 2)}**; "
-            f"com mais de 20 minutos de atraso a nota cai para **{numero(z.avaliacao_media, 2)}**.")
-
-
-def _pagamento(df):
-    a = df.iloc[0]
-    return (f"No almoço de dias úteis (11h às 14h), **{a.forma_pagamento}** lidera com "
-            f"{pct(a.participacao)} dos pedidos, seguido de {df.iloc[1].forma_pagamento} "
-            f"({pct(df.iloc[1].participacao)}).")
+    return (f"Entre hubs com pelo menos 2.000 pedidos, o maior cancelamento é o de **{r.hub}** "
+            f"({r.cidade}): {pct(r.taxa_cancelamento)} em {numero(r.pedidos)} pedidos. "
+            "Os nomes dos hubs foram embaralhados na origem dos dados.")
 
 
 EXEMPLOS = [
-    Exemplo("Qual foi o GMV por cidade?", "GMV, participação e ticket médio por cidade", """
-        SELECT cidade, sum(valor_total) AS gmv,
-               sum(valor_total) / sum(sum(valor_total)) OVER () AS participacao,
-               avg(valor_total) AS ticket_medio
-        FROM v_pedidos WHERE entregue GROUP BY 1 ORDER BY gmv DESC""",
-            _gmv_cidade, ("barra", "cidade", "gmv", "GMV por cidade (R$)")),
-    Exemplo("Que culinária cada faixa etária prefere?", "Três culinárias mais pedidas em cada faixa etária", """
-        SELECT faixa_etaria, culinaria, count(*) AS pedidos,
-               count(*) / sum(count(*)) OVER (PARTITION BY faixa_etaria) AS participacao,
-               row_number() OVER (PARTITION BY faixa_etaria ORDER BY count(*) DESC) AS posicao
-        FROM v_pedidos GROUP BY 1, 2
-        QUALIFY posicao <= 3 ORDER BY 1, posicao""", _faixa),
-    Exemplo("Em que horários o prazo de entrega falha mais?", "Percentual de pedidos no prazo por hora do dia", """
-        SELECT hora, count(*) AS pedidos, avg(CAST(no_prazo AS INT)) AS pct_no_prazo,
-               avg(tempo_entrega_min) AS tempo_medio_min
-        FROM v_pedidos WHERE entregue GROUP BY 1 HAVING count(*) >= 500 ORDER BY 1""",
-            _sla, ("linha", "hora", "pct_no_prazo", "Pedidos entregues no prazo, por hora do dia")),
-    Exemplo("Quais restaurantes têm mais cancelamentos?", "Taxa de cancelamento dos restaurantes com 150+ pedidos", """
-        SELECT restaurante, culinaria, cidade, count(*) AS pedidos,
-               avg(CAST(NOT entregue AS INT)) AS taxa_cancelamento,
-               avg(tempo_entrega_min) AS tempo_medio_min
-        FROM v_pedidos GROUP BY 1, 2, 3 HAVING count(*) >= 150
-        ORDER BY taxa_cancelamento DESC LIMIT 10""", _cancel),
-    Exemplo("Como evoluiu o ticket médio ao longo do ano?", "Ticket médio por mês", """
-        SELECT mes, avg(valor_total) AS ticket_medio, count(*) AS pedidos
-        FROM v_pedidos WHERE entregue GROUP BY 1 ORDER BY 1""",
-            _ticket, ("linha", "mes", "ticket_medio", "Ticket médio por mês (R$)")),
-    Exemplo("Assinantes do clube pedem mais?", "Frequência e ticket de assinantes e não assinantes", """
-        SELECT assinante_clube, count(DISTINCT cliente_id) AS clientes,
-               count(*) / count(DISTINCT cliente_id) AS pedidos_por_cliente,
-               avg(valor_total) AS ticket_medio
-        FROM v_pedidos WHERE entregue GROUP BY 1 ORDER BY 1 DESC""", _clube),
-    Exemplo("O atraso na entrega afeta a avaliação?", "Nota média por faixa de atraso", """
-        SELECT CASE WHEN atraso <= 0 THEN '1. No prazo' WHEN atraso <= 10 THEN '2. Até 10 min'
-                    WHEN atraso <= 20 THEN '3. 11 a 20 min' ELSE '4. Mais de 20 min' END AS faixa_atraso,
-               avg(avaliacao) AS avaliacao_media, count(*) AS avaliacoes
-        FROM (SELECT avaliacao, tempo_entrega_min - tempo_prometido_min AS atraso
-              FROM v_pedidos WHERE avaliacao IS NOT NULL)
-        GROUP BY 1 ORDER BY 1""",
-            _atraso, ("barra", "faixa_atraso", "avaliacao_media", "Nota média por atraso na entrega")),
-    Exemplo("Qual forma de pagamento domina o almoço?", "Formas de pagamento no almoço de dias úteis", """
-        SELECT forma_pagamento, count(*) AS pedidos,
-               count(*) / sum(count(*)) OVER () AS participacao
-        FROM v_pedidos WHERE hora BETWEEN 11 AND 14 AND dia_semana_num <= 5
-        GROUP BY 1 ORDER BY pedidos DESC""", _pagamento),
+    Exemplo("Qual foi o GMV por cidade?", "Vendas, participação e ticket médio por cidade", """
+        SELECT cidade, sum(valor) AS gmv,
+               sum(valor) / sum(sum(valor)) OVER () AS participacao,
+               avg(valor) AS ticket_medio
+        FROM v_pedidos WHERE finalizado GROUP BY 1 ORDER BY gmv DESC""",
+            _gmv_cidade, ("barra", "cidade", "gmv", "Vendas (GMV) por cidade")),
+    Exemplo("Comida ou produtos: o que demora mais?", "Tempo, pontualidade e cancelamento por segmento", """
+        SELECT segmento, count(*) AS pedidos,
+               median(tempo_total_min) FILTER (WHERE finalizado) AS tempo_mediano_min,
+               avg(CAST(tempo_total_min <= 60 AS INT)) FILTER (WHERE finalizado) AS pct_ate_60,
+               avg(CAST(NOT finalizado AS INT)) AS taxa_cancelamento
+        FROM v_pedidos GROUP BY 1 ORDER BY 1""", _segmento),
+    Exemplo("Em que horário chegam mais pedidos?", "Pedidos por hora do dia", """
+        SELECT hora, count(*) AS pedidos FROM v_pedidos GROUP BY 1 ORDER BY 1""",
+            _horario, ("linha", "hora", "pedidos", "Pedidos por hora do dia")),
+    Exemplo("Marketplace ou canal próprio: onde o ticket é maior?", "Pedidos, vendas e ticket por tipo de canal", """
+        SELECT tipo_canal, count(*) AS pedidos, sum(valor) AS gmv, avg(valor) AS ticket_medio
+        FROM v_pedidos WHERE finalizado GROUP BY 1 ORDER BY gmv DESC""", _canal),
+    Exemplo("Moto ou bicicleta: quem faz as entregas?", "Entregas, distância e trânsito por modal", """
+        SELECT modal_entrega, count(*) AS pedidos,
+               median(distancia_km) AS distancia_mediana_km,
+               median(tempo_transito_min) AS transito_mediano_min
+        FROM v_pedidos WHERE finalizado AND modal_entrega IS NOT NULL
+        GROUP BY 1 ORDER BY pedidos DESC""", _modal),
+    Exemplo("Onde a taxa de entrega não cobre o custo?", "Taxa cobrada sobre custo da entrega, por cidade", """
+        SELECT cidade, sum(taxa_entrega) / sum(custo_entrega) AS frete_coberto,
+               avg(taxa_entrega) AS taxa_media, avg(custo_entrega) AS custo_medio
+        FROM v_pedidos WHERE finalizado AND custo_entrega IS NOT NULL
+        GROUP BY 1 ORDER BY frete_coberto""",
+            _frete, ("barra", "cidade", "frete_coberto", "Quanto do custo da entrega a taxa cobre")),
+    Exemplo("A distância aumenta o tempo de trânsito?", "Trânsito mediano por faixa de distância", """
+        SELECT CASE WHEN distancia_km <= 1 THEN '1. Até 1 km' WHEN distancia_km <= 2 THEN '2. 1 a 2 km'
+                    WHEN distancia_km <= 3 THEN '3. 2 a 3 km' WHEN distancia_km <= 5 THEN '4. 3 a 5 km'
+                    ELSE '5. Mais de 5 km' END AS faixa_distancia,
+               count(*) AS pedidos, median(tempo_transito_min) AS transito_mediano_min
+        FROM v_pedidos WHERE finalizado AND distancia_km IS NOT NULL AND tempo_transito_min IS NOT NULL
+        GROUP BY 1 ORDER BY 1""", _distancia),
+    Exemplo("Quais hubs têm mais cancelamentos?", "Taxa de cancelamento dos hubs com 2.000+ pedidos", """
+        SELECT hub, cidade, count(*) AS pedidos, avg(CAST(NOT finalizado AS INT)) AS taxa_cancelamento
+        FROM v_pedidos GROUP BY 1, 2 HAVING count(*) >= 2000
+        ORDER BY taxa_cancelamento DESC LIMIT 10""", _hub_cancel),
 ]
 
 _IGNORAR = {"a", "o", "as", "os", "de", "da", "do", "das", "dos", "em", "que", "qual", "quais", "por",
-            "e", "foi", "tem", "mais", "na", "no", "ao", "como", "cada", "para", "um", "uma", "se"}
+            "e", "foi", "tem", "mais", "na", "no", "ao", "como", "cada", "para", "um", "uma", "se", "ou",
+            "onde", "quem", "nao"}
 
 
 def _palavras(texto: str) -> set[str]:
@@ -167,6 +169,9 @@ def responder(pergunta: str, con) -> Resposta:
             f"{lista}\n\nPara perguntas livres, defina `ANTHROPIC_API_KEY` e reinicie."))
     df = db.consultar_seguro(con, ex.sql)
     passos = [Passo("executar_sql", ex.descricao, ex.sql.strip(), resultado=df)]
+    if df.empty:
+        return Resposta(texto="A consulta não devolveu nenhuma linha para estes dados.", passos=passos,
+                        modo="demo", modelo="sem modelo")
     if ex.grafico:
         tipo, x, y, titulo = ex.grafico
         passos.append(Passo("criar_grafico", titulo, ex.sql.strip(), resultado=df,

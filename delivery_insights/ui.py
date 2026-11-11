@@ -242,5 +242,6 @@ def pergunta(texto: str) -> str:
     return f'<div class="pr-pergunta"><span>{escape(texto)}</span></div>'
 
 
-def rodape(texto: str) -> str:
-    return f'<div class="pr-rodape">{escape(texto)}</div>'
+def rodape(texto: str, url: str = "") -> str:
+    fonte = f' <a href="{escape(url)}" target="_blank" rel="noopener">Ver a fonte</a>' if url else ""
+    return f'<div class="pr-rodape">{escape(texto)}{fonte}</div>'

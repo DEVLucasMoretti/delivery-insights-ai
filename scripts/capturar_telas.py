@@ -32,10 +32,10 @@ DESTINO = Path(__file__).resolve().parents[1] / "docs" / "img"
 # nome do arquivo -> caminho na aplicação
 TELAS = {
     "painel": "",
-    "consumo": "?aba=consumo",
-    "clientes": "?aba=clientes",
-    "operacao": "?aba=entrega",
-    "assistente": "?pergunta=" + quote("Em que horários o prazo de entrega falha mais?"),
+    "demanda": "?aba=demanda",
+    "canais": "?aba=canais",
+    "entrega": "?aba=entrega",
+    "assistente": "?pergunta=" + quote("Onde a taxa de entrega não cobre o custo?"),
 }
 
 PRONTA = """(() => {

@@ -36,8 +36,9 @@ except Exception:
 
 LIMITE_PERGUNTAS = int(os.getenv("LIMITE_PERGUNTAS_SESSAO", "20"))  # protege a chave numa demo pública
 GRAFICO = dict(theme=None, config={"displayModeBar": False})
-PERIODOS = {"30 dias": 30, "90 dias": 90, "Todo o período": None, "Escolher datas": None}
-ABAS = ["Resumo", "Consumo", "Clientes", "Entrega"]
+PERIODOS = {"30 dias": 30, "60 dias": 60, "Todo o período": None, "Escolher datas": None}
+ABAS = ["Resumo", "Demanda", "Canais", "Entrega"]
+NOTA_NOMES = "Os nomes de lojas, hubs e canais foram embaralhados na origem dos dados."
 _n_cartao = count()  # chave única por cartão: é por ela que o CSS encontra o cartão
 
 
@@ -89,16 +90,16 @@ html('<hr class="pr-filete">')
 
 # ----------------------------------- painel -----------------------------------
 def limpar_recorte():
-    st.session_state.update(f_periodo="Todo o período", f_cidades=[], f_culinarias=[])
+    st.session_state.update(f_periodo="Todo o período", f_cidades=[], f_segmentos=[])
 
 
 def recorte() -> Filtros:
     c_periodo, c_filtros, c_ativos = st.columns([6, 2, 4], vertical_alignment="center")
-    periodo = c_periodo.segmented_control("Período", list(PERIODOS), default="90 dias", key="f_periodo",
-                                          label_visibility="collapsed") or "90 dias"
+    periodo = c_periodo.segmented_control("Período", list(PERIODOS), default="30 dias", key="f_periodo",
+                                          label_visibility="collapsed") or "30 dias"
     with c_filtros.popover("Recorte", width="stretch"):
         cidades = st.multiselect("Cidade", opcoes("cidade"), placeholder="Todas", key="f_cidades")
-        culinarias = st.multiselect("Culinária", opcoes("culinaria"), placeholder="Todas", key="f_culinarias")
+        segmentos = st.multiselect("Segmento", opcoes("segmento"), placeholder="Todos", key="f_segmentos")
         inicio, fim = DATA_MIN, DATA_MAX
         if periodo == "Escolher datas":
             datas = st.date_input("Datas", (DATA_MIN, DATA_MAX), min_value=DATA_MIN, max_value=DATA_MAX,
@@ -109,11 +110,11 @@ def recorte() -> Filtros:
     dias = PERIODOS[periodo]
     if dias:
         inicio = DATA_MAX - timedelta(days=dias - 1)
-    ativos = [(c, True) for c in cidades] + [(c, True) for c in culinarias]
+    ativos = [(c, True) for c in cidades] + [(c, True) for c in segmentos]
     if ativos:
         with c_ativos:
             html(ui.pilulas(ativos))
-    return Filtros(inicio, fim, tuple(cidades), tuple(culinarias))
+    return Filtros(inicio, fim, tuple(cidades), tuple(segmentos))
 
 
 def variacao(atual: dict, anterior: dict | None, chave: str, comparacao: str,
@@ -145,136 +146,165 @@ def bloco_indicadores(f: Filtros, k: dict, ant: dict | None):
                     var=variacao(k, ant, chave, comp if serie is not None else "", **kw) if ant else None)
 
     html(ui.indicadores(
-        heroi=ind("Vendas (GMV)", brl_curto(k["gmv"]), "Valor total dos pedidos entregues.", "gmv", s["gmv"]),
+        heroi=ind("Vendas (GMV)", brl_curto(k["gmv"]), "Valor total dos pedidos finalizados.", "gmv", s["gmv"]),
         apoio=[
             ind("Pedidos", numero(k["pedidos"]), "Pedidos feitos no período, incluindo cancelados.",
                 "pedidos", s["pedidos"]),
-            ind("Ticket médio", brl(k["ticket_medio"], 2), "Vendas divididas pelos pedidos entregues.",
+            ind("Ticket médio", brl(k["ticket_medio"], 2), "Valor médio dos pedidos finalizados.",
                 "ticket_medio", s["ticket_medio"]),
-            ind("Clientes ativos", numero(k["clientes_ativos"]), "Quem fez pelo menos um pedido no período.",
-                "clientes_ativos", s["clientes_ativos"]),
+            ind("Lojas ativas", numero(k["lojas_ativas"]), "Lojas com pelo menos um pedido no período.",
+                "lojas_ativas", s["lojas_ativas"]),
         ],
         saude=[
-            ind("No prazo", pct(k["pct_no_prazo"]), "Pedidos que chegaram dentro do tempo prometido.",
-                "pct_no_prazo", pontos=True),
+            ind("Tempo total", f"{numero(k['tempo_mediano_min'])} min",
+                "Mediana, do pedido criado até concluído.", "tempo_mediano_min", menor_e_melhor=True),
+            ind("Em até 60 min", pct(k["pct_ate_60"]), "Pedidos finalizados em 60 minutos ou menos.",
+                "pct_ate_60", pontos=True),
             ind("Cancelados", pct(k["taxa_cancelamento"]), "Pedidos cancelados sobre pedidos feitos.",
                 "taxa_cancelamento", pontos=True, menor_e_melhor=True),
-            ind("Nota média", numero(k["avaliacao_media"], 2), "De 1 a 5, entre os clientes que avaliaram.",
-                "avaliacao_media"),
-            ind("Comissão", pct(k["take_rate"]), "Take rate: receita da plataforma dividida pelas vendas.",
-                "take_rate", pontos=True),
+            ind("Frete coberto", pct(k["frete_coberto"], 0),
+                "Taxa de entrega cobrada dividida pelo custo da entrega.", "frete_coberto", pontos=True),
         ]))
 
 
+_ONDE = {"segmento": lambda v: f"Em pedidos de <b>{v.lower()}</b>", "cidade": lambda v: f"Em <b>{v}</b>",
+         "tipo_canal": lambda v: f"Em pedidos de <b>{v.lower()}</b>"}
+
+
 def principal_achado(f: Filtros, k: dict) -> str | None:
-    """Maior desvio em relação à média do período: o pior horário para o prazo de entrega."""
-    sla = metrics.sla_por_hora(con, f)
-    media = k["pct_no_prazo"]
-    if sla.empty or media != media:
+    """O grupo (segmento, cidade ou tipo de canal) cujo tempo total mais se afasta do recorte."""
+    geral = k["tempo_mediano_min"]
+    if geral != geral or not geral:
         return None
-    pior = sla.loc[sla["pct_no_prazo"].idxmin()]
-    queda = (media - pior["pct_no_prazo"]) * 100
-    if queda < 1:
+    melhor = None
+    for dim in _ONDE:
+        d = metrics.por_dimensao(con, f, dim)
+        d = d[(d["participacao"] >= 0.05) & d["tempo_mediano_min"].notna()]
+        if len(d) < 2:
+            continue
+        linha = d.loc[d["tempo_mediano_min"].idxmax()]
+        razao = linha["tempo_mediano_min"] / geral
+        if melhor is None or razao > melhor[0]:
+            melhor = (razao, dim, linha)
+    if melhor is None or melhor[0] < 1.10:
         return None
-    return (f"Às <b>{int(pior['hora'])}h</b>, só <b>{pct(pior['pct_no_prazo'], 0)}</b> dos pedidos chegam no prazo: "
-            f"<b>{numero(queda, 0)} p.p.</b> abaixo da média do período ({pct(media, 0)}).")
+    razao, dim, linha = melhor
+    return (f"{_ONDE[dim](linha[dim])}, o tempo total é de <b>{numero(linha['tempo_mediano_min'])} min</b> "
+            f"(mediana): <b>{numero(razao, 1)}×</b> os {numero(geral)} min do recorte, em "
+            f"{numero(linha['pedidos'])} pedidos.")
+
+
+def tabela(df, colunas: list[str]):
+    df = df.copy()
+    df.columns = colunas
+    st.dataframe(df, hide_index=True, width="stretch")
 
 
 def aba_resumo(f: Filtros, k: dict):
     dias = (f.fim - f.inicio).days
     grao = "day" if dias <= 45 else "week"
-    s = metrics.serie_temporal(con, f, grao)
+    s = metrics.serie_kpis(con, f, grao)
     if grao == "week" and len(s) > 4:
         s = s.iloc[1:-1]
     cartao(f"Como as vendas andaram, {'dia a dia' if grao == 'day' else 'semana a semana'}?",
-           charts.serie(s, "periodo", "gmv"), sub="Vendas (GMV) em reais, pedidos entregues")
+           charts.serie(s, "periodo", "gmv"), sub="Vendas (GMV) em reais, pedidos finalizados")
     a, b = st.columns(2)
-    cartao("Que culinárias vendem mais?", alvo=a, sub="Vendas (GMV) no período",
-           fig=charts.barras_h(metrics.por_dimensao(con, f, "culinaria"), "culinaria", "gmv"))
-    cartao("Onde está a venda?", alvo=b, sub="Vendas (GMV) por cidade",
+    cartao("Onde está a venda?", alvo=a, sub="Vendas (GMV) por cidade",
            fig=charts.barras_h(metrics.por_dimensao(con, f, "cidade"), "cidade", "gmv"))
+    seg = metrics.por_dimensao(con, f, "segmento")
+    titulo = "Comida ou produtos?"
+    if len(seg) == 2 and seg["gmv"].sum():
+        c = seg.set_index("segmento").loc["Comida"]
+        titulo = (f"Comida faz {pct(c['participacao'], 0)} dos pedidos e "
+                  f"{pct(c['gmv'] / seg['gmv'].sum(), 0)} das vendas")
+    cartao(titulo, alvo=b, sub="Vendas (GMV) por segmento",
+           fig=charts.barras_h(seg, "segmento", "gmv"))
     with caixa():
-        html(ui.cartao_titulo("Os restaurantes que mais vendem", "Os 10 primeiros em vendas no período"))
-        top = metrics.top_restaurantes(con, f)
-        top = top.assign(pedidos=top.pedidos.map(numero), gmv=top.gmv.map(brl),
-                         avaliacao_media=top.avaliacao_media.map(lambda v: numero(v, 2)),
-                         taxa_cancelamento=top.taxa_cancelamento.map(pct))
-        top.columns = ["Restaurante", "Culinária", "Cidade", "Pedidos", "Vendas", "Nota", "Cancelados"]
-        st.dataframe(top, hide_index=True, width="stretch")
+        html(ui.cartao_titulo("As lojas que mais vendem", "As 10 primeiras em vendas no período"))
+        top = metrics.top_lojas(con, f)
+        tabela(top.assign(pedidos=top.pedidos.map(numero), gmv=top.gmv.map(brl),
+                          tempo_mediano_min=top.tempo_mediano_min.map(lambda v: f"{numero(v)} min"),
+                          taxa_cancelamento=top.taxa_cancelamento.map(pct)),
+               ["Loja", "Segmento", "Cidade", "Pedidos", "Vendas", "Tempo total", "Cancelados"])
+        html(ui.nota(NOTA_NOMES))
     html(ui.link_pergunta("Qual foi o GMV por cidade?"))
 
 
-def aba_consumo(f: Filtros, k: dict):
+def aba_demanda(f: Filtros, k: dict):
     mapa = metrics.mapa_hora_dia(con, f)
     pico = mapa.loc[mapa["pedidos"].idxmax()]
     cartao("Quando o pedido acontece?", charts.calor_hora_dia(mapa),
-           sub=f"Pedidos por dia da semana e hora · pico: {pico['dia_semana']} às {int(pico['hora'])}h")
-    a, b = st.columns([3, 2])
-    cartao("Quem pede o quê, por idade?", alvo=a, sub="Participação de cada culinária nos pedidos da faixa etária",
-           fig=charts.calor_culinaria_faixa(metrics.culinaria_por_faixa(con, f)))
-    cartao("Onde o ticket é mais alto?", alvo=b, sub="Ticket médio por culinária",
-           fig=charts.barras_h(metrics.por_dimensao(con, f, "culinaria"), "culinaria", "ticket_medio",
-                               formato="moeda"))
+           sub=f"Pedidos por dia da semana e hora (Brasília) · pico: {pico['dia_semana']} às {int(pico['hora'])}h")
     a, b = st.columns(2)
-    pg = metrics.por_dimensao(con, f, "forma_pagamento")
-    pg["participacao"] = pg["pedidos"] / pg["pedidos"].sum()
-    cartao("Como se paga?", alvo=a, sub="Participação de cada forma de pagamento nos pedidos",
-           fig=charts.barras_h(pg, "forma_pagamento", "participacao", formato="pct"))
-    fx = metrics.por_dimensao(con, f, "faixa_etaria").sort_values("faixa_etaria")
-    cartao("Que idade pede mais?", alvo=b, sub="Pedidos por faixa etária",
-           fig=charts.barras_v(fx, "faixa_etaria", "pedidos"))
-    html(ui.link_pergunta("Que culinária cada faixa etária prefere?"))
+    cartao("Onde o ticket é mais alto?", alvo=a, sub="Ticket médio por cidade",
+           fig=charts.barras_h(metrics.por_dimensao(con, f, "cidade"), "cidade", "ticket_medio", formato="moeda"))
+    pg = metrics.pagamentos(con, f)
+    titulo = "Como se paga?"
+    if len(pg):
+        titulo = f"{pct(pg['participacao'].iloc[0], 0)} do valor é pago por {pg['metodo'].iloc[0].lower()}"
+    cartao(titulo, alvo=b, sub="Participação de cada método no valor pago",
+           fig=charts.barras_h(pg, "metodo", "participacao", formato="pct"))
+    cartao("Que hubs concentram a venda?", sub="Vendas (GMV) dos 10 maiores hubs", nota=NOTA_NOMES,
+           fig=charts.barras_h(metrics.por_dimensao(con, f, "hub", 10), "hub", "gmv"))
+    html(ui.link_pergunta("Em que horário chegam mais pedidos?"))
 
 
-def aba_clientes(f: Filtros, k: dict):
-    a, b = st.columns([3, 2])
-    co = metrics.coortes(con, f)
-    cartao("Quem chega, volta?", alvo=a, fig=None if co.empty else charts.calor_coortes(co),
-           sub="Clientes novos que voltam a pedir, mês a mês",
-           nota="Cada linha é a turma que fez o primeiro pedido naquele mês. "
-                "Usa o período completo dos dados, sem o filtro de datas.")
-    seg = metrics.segmentos(con, f)
-    cartao("Como a base se divide?", alvo=b, sub="Clientes por recência e frequência",
-           fig=charts.barras_h(seg, "segmento", "clientes", formato="numero"),
-           nota=f"Recência contada até {f.fim:%d/%m/%Y}; frequência dentro do recorte.")
-    rc = metrics.recompra_30d(con, f)
-    if not rc.empty:
-        media = (rc["recompra_30d"] * rc["clientes_novos"]).sum() / rc["clientes_novos"].sum()
-        rc["mes"] = [charts._MESES[d.month - 1] for d in rc["coorte"]]
-        cartao(f"{pct(media, 0)} fazem o segundo pedido em até 30 dias",
-               charts.barras_v(rc, "mes", "recompra_30d", formato="pct", destaque=None,
-                               faixa_y=[0, min(1.1, rc["recompra_30d"].max() * 1.2)]),
-               sub="Recompra em 30 dias, por mês do primeiro pedido")
-    cartao("De que canal vêm os clientes que mais compram?", sub="Vendas (GMV) por canal de aquisição",
-           fig=charts.barras_h(metrics.por_dimensao(con, f, "canal_aquisicao"), "canal_aquisicao", "gmv"))
-    html(ui.link_pergunta("Assinantes do clube pedem mais?"))
+def aba_canais(f: Filtros, k: dict):
+    tipo = metrics.por_dimensao(con, f, "tipo_canal")
+    a, b = st.columns(2)
+    titulo = "De onde vêm os pedidos?"
+    if len(tipo):
+        maior = tipo.loc[tipo["pedidos"].idxmax()]
+        titulo = f"{pct(maior['participacao'], 0)} dos pedidos vêm de {maior['tipo_canal'].lower()}"
+    cartao(titulo, alvo=a, sub="Pedidos por tipo de canal",
+           fig=charts.barras_h(tipo, "tipo_canal", "pedidos", formato="numero"))
+    cartao("Onde o ticket é maior?", alvo=b, sub="Ticket médio por tipo de canal",
+           fig=charts.barras_h(tipo, "tipo_canal", "ticket_medio", formato="moeda"))
+    a, b = st.columns(2)
+    cartao("Que canais vendem mais?", alvo=a, sub="Vendas (GMV) dos 10 maiores canais", nota=NOTA_NOMES,
+           fig=charts.barras_h(metrics.por_dimensao(con, f, "canal", 10), "canal", "gmv"))
+    cartao("Em que canal o pedido chega mais rápido?", alvo=b, sub="Pedidos finalizados em até 60 minutos",
+           fig=charts.barras_h(tipo, "tipo_canal", "pct_ate_60", formato="pct", destaque="min"),
+           nota="O canal próprio vende mais produtos, que demoram mais do que comida.")
+    html(ui.link_pergunta("Marketplace ou canal próprio: onde o ticket é maior?"))
 
 
 def aba_entrega(f: Filtros, k: dict):
-    sla = metrics.sla_por_hora(con, f)
     a, b = st.columns(2)
-    titulo_sla = "A que horas o prazo estoura?"
-    if not sla.empty:
-        pior = sla.loc[sla["pct_no_prazo"].idxmin()]
-        titulo_sla = f"O prazo cai para {pct(pior['pct_no_prazo'], 0)} às {int(pior['hora'])}h"
-    cartao(titulo_sla, charts.linha_sla(sla, k["pct_no_prazo"]), alvo=a,
-           sub="Pedidos entregues no prazo, por hora do dia")
-    atraso = metrics.atraso_vs_avaliacao(con, f)
-    desce = len(atraso) > 1 and atraso["avaliacao_media"].is_monotonic_decreasing
-    cartao("Cada faixa de atraso derruba a nota" if desce else "Como o atraso afeta a nota?", alvo=b,
-           fig=charts.barras_v(atraso, "atraso", "avaliacao_media", formato="nota", faixa_y=[0, 5.8],
-                               destaque="min"),
-           sub="Nota média (1 a 5) conforme o atraso")
+    et = metrics.etapas(con, f)
+    titulo = "Onde o tempo vai?"
+    if len(et):
+        maior = et.loc[et["minutos"].idxmax()]
+        titulo = f"{maior['etapa']} é a etapa mais longa: {numero(maior['minutos'])} min"
+    cartao(titulo, alvo=a, sub="Mediana de cada etapa, da loja até o cliente",
+           fig=charts.barras_h(et.iloc[::-1], "etapa", "minutos", formato="minutos") if len(et) else None,
+           nota="As etapas não somam o tempo total: cada mediana é calculada em separado.")
+    hora = metrics.tempo_por_hora(con, f)
+    hora = hora[hora["pedidos"] >= 0.01 * hora["pedidos"].sum()]  # madrugada tem poucos pedidos e esperas de horas
+    titulo = "A que horas o pedido demora mais?"
+    if len(hora):
+        pior = hora.loc[hora["tempo_mediano_min"].idxmax()]
+        titulo = f"O pedido das {int(pior['hora'])}h é o mais demorado: {numero(pior['tempo_mediano_min'])} min"
+    cartao(titulo, charts.linha_hora(hora, "tempo_mediano_min", k["tempo_mediano_min"]), alvo=b,
+           sub="Tempo total mediano por hora do pedido",
+           nota="Só horas com pelo menos 1% dos pedidos do recorte.")
+    a, b = st.columns(2)
+    modal = metrics.por_dimensao(con, f, "modal_entrega")
+    cartao("Moto ou bicicleta?", alvo=a, sub="Distância mediana de cada modal",
+           fig=charts.barras_h(modal, "modal_entrega", "distancia_mediana_km", formato="km"),
+           nota=" · ".join(f"{r.modal_entrega}: {pct(r.participacao, 0)} das entregas" for r in modal.itertuples()))
+    dist = metrics.distancia_vs_transito(con, f)
+    cartao("Quanto a distância pesa no trânsito?", alvo=b, sub="Tempo de trânsito mediano por distância",
+           fig=charts.barras_v(dist, "distancia", "transito_mediano_min", formato="minutos"))
     cid = metrics.por_dimensao(con, f, "cidade")
     a, b = st.columns(2)
-    cartao("Onde a entrega cumpre o prometido?", alvo=a, sub="Pedidos no prazo, por cidade",
-           fig=charts.barras_h(cid, "cidade", "pct_no_prazo", formato="pct", destaque="min"))
-    cartao("Quanto demora a entrega em cada cidade?", alvo=b, sub="Tempo médio de entrega",
-           fig=charts.barras_h(cid, "cidade", "tempo_medio_min", formato="minutos"))
-    cartao("Onde se cancela mais?", sub="Taxa de cancelamento por culinária",
-           fig=charts.barras_h(metrics.por_dimensao(con, f, "culinaria"), "culinaria", "taxa_cancelamento",
-                               formato="pct"))
-    html(ui.link_pergunta("Em que horários o prazo de entrega falha mais?"))
+    cartao("Onde o pedido demora mais?", alvo=a, sub="Tempo total mediano por cidade",
+           fig=charts.barras_h(cid, "cidade", "tempo_mediano_min", formato="minutos"))
+    cartao("Onde a taxa não paga a entrega?", alvo=b, sub="Taxa cobrada sobre o custo da entrega, por cidade",
+           fig=charts.barras_h(cid, "cidade", "frete_coberto", formato="pct", destaque="min"))
+    cartao("Onde se cancela mais?", sub="Taxa de cancelamento por cidade",
+           fig=charts.barras_h(cid, "cidade", "taxa_cancelamento", formato="pct"))
+    html(ui.link_pergunta("Onde a taxa de entrega não cobre o custo?"))
 
 
 def painel():
@@ -295,7 +325,7 @@ def painel():
     aba_do_link = st.query_params.get("aba", "").lower()  # ?aba=entrega abre direto nessa aba
     inicial = next((a for a in ABAS if a.lower().startswith(aba_do_link)), None) if aba_do_link else None
     for aba, desenhar in zip(st.tabs(ABAS, default=inicial),
-                             (aba_resumo, aba_consumo, aba_clientes, aba_entrega)):
+                             (aba_resumo, aba_demanda, aba_canais, aba_entrega)):
         with aba:
             desenhar(f, k)
 
@@ -383,7 +413,7 @@ def assistente():
         else:
             mostrar(conteudo)
 
-    digitada = st.chat_input("Ex.: por que o prazo é pior em algumas cidades?" if com_ia
+    digitada = st.chat_input("Ex.: por que produtos demoram mais do que comida?" if com_ia
                              else "Escolha ou digite uma pergunta do catálogo")
     pergunta = digitada or escolhida
     if pergunta_do_link and not st.session_state.conversa:
@@ -404,4 +434,4 @@ if pagina == "Painel":
     painel()
 else:
     assistente()
-html(ui.rodape(FONTE_DADOS["frase"]))
+html(ui.rodape(FONTE_DADOS["frase"], FONTE_DADOS["url"]))

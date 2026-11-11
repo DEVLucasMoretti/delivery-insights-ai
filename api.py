@@ -17,12 +17,12 @@ try:
 except ImportError:
     pass
 
-from delivery_insights import agent, db, demo, metrics
+from delivery_insights import FONTE_DADOS, agent, db, demo, metrics
 from delivery_insights.metrics import DATA_MAX, DATA_MIN, Filtros
 
 app = FastAPI(
-    title="Delivery Insights AI",
-    description="KPIs e perguntas em linguagem natural sobre dados SINTÉTICOS de um marketplace de delivery.",
+    title="Prova Real",
+    description="KPIs e perguntas em linguagem natural sobre o conjunto público Delivery Center (Kaggle, jan-abr 2021).",
     version="0.1.0",
 )
 
@@ -54,7 +54,7 @@ class RespostaAPI(BaseModel):
 @app.get("/saude")
 def saude() -> dict:
     n = conexao().cursor().execute("SELECT count(*) FROM pedidos").fetchone()[0]
-    return {"ok": True, "pedidos": n, "agente_de_ia": agent.tem_credenciais(), "dados": "sintéticos"}
+    return {"ok": True, "pedidos": n, "agente_de_ia": agent.tem_credenciais(), "dados": FONTE_DADOS["pilula"]}
 
 
 @app.get("/kpis")
@@ -62,12 +62,12 @@ def kpis(
     inicio: date = DATA_MIN,
     fim: date = DATA_MAX,
     cidade: list[str] = Query(default=[]),
-    culinaria: list[str] = Query(default=[]),
+    segmento: list[str] = Query(default=[]),
 ) -> dict:
-    """Indicadores do período (GMV, pedidos, ticket médio, SLA, cancelamento...)."""
+    """Indicadores do período (vendas, pedidos, ticket médio, tempo de entrega, cancelamento...)."""
     if inicio > fim:
         raise HTTPException(422, "A data de início tem de ser anterior à data de fim.")
-    k = metrics.kpis(conexao(), Filtros(inicio, fim, tuple(cidade), tuple(culinaria)))
+    k = metrics.kpis(conexao(), Filtros(inicio, fim, tuple(cidade), tuple(segmento)))
     return {c: (None if v != v else round(float(v), 4)) for c, v in k.items()}  # NaN -> null
 
 

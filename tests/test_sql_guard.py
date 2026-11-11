@@ -9,7 +9,7 @@ from delivery_insights.sql_guard import SqlBloqueado, com_limite, validar
     "SELECT 1",
     "select cidade, count(*) from v_pedidos group by 1;",
     "WITH a AS (SELECT 1 AS x) SELECT * FROM a",
-    "SELECT * FROM v_pedidos WHERE restaurante = 'Drop & Delete Burger; update'",  # texto não é comando
+    "SELECT * FROM v_pedidos WHERE loja = 'Drop & Delete Burger; update'",  # texto não é comando
     "-- comentário\nSELECT 1",
 ])
 def test_consultas_de_leitura_passam(sql):
@@ -56,5 +56,5 @@ def test_banco_recusa_ficheiros_mesmo_sem_o_validador(con, tmp_path):
         con.execute("SET enable_external_access = true")
 
 
-def test_dados_continuam_intactos_depois_das_tentativas(con, tabelas):
-    assert con.execute("SELECT count(*) FROM pedidos").fetchone()[0] == len(tabelas["pedidos"])
+def test_dados_continuam_intactos_depois_das_tentativas(con, brutos):
+    assert con.execute("SELECT count(*) FROM pedidos").fetchone()[0] == len(brutos["orders"])
