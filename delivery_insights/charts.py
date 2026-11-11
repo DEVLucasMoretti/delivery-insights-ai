@@ -79,7 +79,11 @@ def serie(df: pd.DataFrame, x: str, y: str, titulo: str, moeda: bool = True) -> 
     _base(fig, titulo)
     fig.update_layout(hovermode="x unified")
     fig.update_yaxes(rangemode="tozero", tickprefix=prefixo, tickformat="~s")
-    fig.update_xaxes(tickformat="%b")
+    meses = pd.date_range(df[x].min(), df[x].max(), freq="MS")
+    if len(meses) >= 2:  # rótulos dos meses em português
+        fig.update_xaxes(tickvals=meses, ticktext=[_MESES[m.month - 1] for m in meses])
+    else:
+        fig.update_xaxes(tickformat="%d/%m")
     return fig
 
 
@@ -187,6 +191,8 @@ def do_agente(df: pd.DataFrame, tipo: str, x: str, y: str, titulo: str) -> go.Fi
             hovertemplate="%{x}<br><b>%{y:,.2f}</b><extra></extra>"))
         _base(fig, titulo)
         fig.update_yaxes(rangemode="tozero")
+        if pd.api.types.is_datetime64_any_dtype(d[x]):
+            fig.update_xaxes(tickformat="%d/%m/%y")
         return fig
     d = d.head(20)
     d[x] = d[x].astype(str)

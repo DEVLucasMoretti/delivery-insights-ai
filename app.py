@@ -116,7 +116,10 @@ def painel():
     c[3].metric("Take rate", pct(k["take_rate"]), variacao(k, ant, "take_rate", True),
                 help="Receita da plataforma dividida pelo GMV.")
 
-    geral, consumo, clientes, operacao = st.tabs(["Visão geral", "Consumo", "Clientes", "Operação"])
+    abas = ["Visão geral", "Consumo", "Clientes", "Operação"]
+    aba_do_link = st.query_params.get("aba", "").lower()  # ?aba=consumo abre direto nesse separador
+    inicial = next((a for a in abas if a.lower().startswith(aba_do_link)), None) if aba_do_link else None
+    geral, consumo, clientes, operacao = st.tabs(abas, default=inicial)
 
     with geral:
         dias = (f.fim - f.inicio).days
