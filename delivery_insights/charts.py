@@ -65,7 +65,7 @@ def _base(fig: go.Figure, titulo: str = "", altura: int = 340) -> go.Figure:
         hoverlabel=dict(bgcolor="white", bordercolor=GRELHA, font=dict(family=FONTE, color=TINTA, size=12)),
         barcornerradius=4,
     )
-    fig.update_xaxes(showgrid=False, linecolor=EIXO, tickfont=dict(color=MUDO), automargin=True, title=None)
+    fig.update_xaxes(showgrid=False, zeroline=False, linecolor=EIXO, tickfont=dict(color=MUDO), automargin=True, title=None)
     fig.update_yaxes(gridcolor=GRELHA, zeroline=False, tickfont=dict(color=MUDO), automargin=True, title=None)
     return fig
 
@@ -138,7 +138,7 @@ def calor_culinaria_faixa(df: pd.DataFrame, titulo: str) -> go.Figure:
         hovertemplate="%{y} · %{x} anos<br><b>%{text} dos pedidos da faixa</b><extra></extra>"))
     _base(fig, titulo, altura=400)
     fig.update_yaxes(autorange="reversed", showgrid=False, tickfont=dict(color=TINTA_2))
-    fig.update_xaxes(side="top", type="category")
+    fig.update_xaxes(type="category", ticksuffix=" anos", showline=False)
     return fig
 
 
@@ -154,7 +154,7 @@ def calor_coortes(df: pd.DataFrame, titulo: str) -> go.Figure:
         hovertemplate="Clientes novos de %{y}<br>%{x} depois: <b>%{text}</b> voltaram a pedir<extra></extra>"))
     _base(fig, titulo, altura=400)
     fig.update_yaxes(autorange="reversed", showgrid=False, type="category")
-    fig.update_xaxes(side="top", type="category")
+    fig.update_xaxes(type="category", showline=False)
     return fig
 
 

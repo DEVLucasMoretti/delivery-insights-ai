@@ -86,6 +86,11 @@ _PALAVRAS = [
     "da Família", "Raízes", "Jardim", "do Mercado", "Sol Nascente", "Estação",
     "da Lagoa", "Nativa", "Capital", "do Parque", "Flor de Sal", "Divino",
 ]
+_BAIRROS = [
+    "Centro", "Jardins", "Vila Nova", "Boa Vista", "Santa Luzia", "Alto da Serra", "Savassi",
+    "Batel", "Moinhos", "Barra", "Aldeota", "Asa Sul", "Cambuí", "Pinheiros", "Tijuca",
+    "Graças", "Pituba", "Lourdes", "Água Verde", "Botafogo",
+]
 
 
 def _perfil_horario(pesos: dict) -> np.ndarray:
@@ -125,8 +130,10 @@ def gerar(
     for i in range(n_restaurantes):
         cul = CULINARIAS[r_cul[i]]
         nome = f"{rng.choice(cul.prefixos)} {rng.choice(_PALAVRAS)}"
+        if nome in vistos:  # nome repetido vira uma "unidade" de bairro
+            nome = f"{nome} ({rng.choice(_BAIRROS)})"
         if nome in vistos:
-            nome = f"{nome} {i + 1}"
+            nome = f"{nome[:-1]} {i + 1})"
         vistos.add(nome)
         nomes.append(nome)
     restaurantes = pd.DataFrame({
@@ -178,7 +185,7 @@ def gerar(
     peso_dow = np.array([0.85, 0.82, 0.86, 0.92, 1.15, 1.30, 1.22])
     peso_mes = np.array([0.95, 0.93, 0.96, 0.97, 0.98, 1.0, 1.06, 1.0, 0.99, 1.0, 1.02, 1.08])
     aceita = rng.random(n_candidatos) < (
-        peso_dow[dia.dayofweek] / peso_dow.max() * peso_mes[dia.month - 1] / peso_mes.max())
+        peso_dow[dia.day_of_week] / peso_dow.max() * peso_mes[dia.month - 1] / peso_mes.max())
     cli, dia = cli[aceita], dia[aceita]
     n = len(cli)
 
@@ -200,7 +207,7 @@ def gerar(
         mask = cul_idx == k
         hora[mask] = rng.choice(24, mask.sum(), p=_perfil_horario(cul.horarios))
     data_hora = dia + pd.to_timedelta(hora * 60 + rng.integers(0, 60, n), unit="m")
-    dow = dia.dayofweek.values
+    dow = dia.day_of_week.values
 
     ticket = np.array([c.ticket for c in CULINARIAS])[cul_idx]
     preparo = np.array([c.preparo for c in CULINARIAS])[cul_idx]

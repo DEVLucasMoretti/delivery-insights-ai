@@ -50,10 +50,14 @@ def opcoes(coluna: str) -> list[str]:
     return db.consultar(con, f"SELECT DISTINCT {coluna} FROM v_pedidos ORDER BY 1")[coluna].tolist()
 
 
+# link direto: ?pergunta=... abre o assistente já com a pergunta feita
+pergunta_do_link = st.query_params.get("pergunta")
+
 # ------------------------------- barra lateral -------------------------------
 with st.sidebar:
     st.markdown("## 🍽️ Delivery Insights AI")
-    pagina = st.radio("Página", ["📊 Painel", "🤖 Pergunte aos dados"], label_visibility="collapsed")
+    pagina = st.radio("Página", ["📊 Painel", "🤖 Pergunte aos dados"], label_visibility="collapsed",
+                      index=1 if pergunta_do_link else 0)
     st.markdown('<div class="aviso">⚠️ <b>Dados sintéticos.</b> Simulação reprodutível de um marketplace '
                 'de delivery (2025). Nenhum dado é de uma empresa real.</div>', unsafe_allow_html=True)
     st.markdown("### Filtros do painel")
@@ -129,12 +133,11 @@ def painel():
                                        "GMV por cidade"), **GRAFICO)
         st.markdown("##### Restaurantes com maior GMV")
         top = metrics.top_restaurantes(con, f)
-        st.dataframe(top, hide_index=True, width="stretch", column_config={
-            "restaurante": "Restaurante", "culinaria": "Culinária", "cidade": "Cidade",
-            "pedidos": st.column_config.NumberColumn("Pedidos", format="localized"),
-            "gmv": st.column_config.NumberColumn("GMV (R$)", format="%.0f"),
-            "avaliacao_media": st.column_config.NumberColumn("Avaliação", format="%.2f"),
-            "taxa_cancelamento": st.column_config.NumberColumn("Cancelamento", format="percent")})
+        top = top.assign(pedidos=top.pedidos.map(numero), gmv=top.gmv.map(brl),
+                         avaliacao_media=top.avaliacao_media.map(lambda v: numero(v, 2)),
+                         taxa_cancelamento=top.taxa_cancelamento.map(pct))
+        top.columns = ["Restaurante", "Culinária", "Cidade", "Pedidos", "GMV", "Avaliação", "Cancelamento"]
+        st.dataframe(top, hide_index=True, width="stretch")
 
     with consumo:
         st.plotly_chart(charts.calor_hora_dia(metrics.mapa_hora_dia(con, f),
@@ -267,11 +270,16 @@ def assistente():
 
     for papel, conteudo in st.session_state.conversa:
         with st.chat_message(papel):
-            st.markdown(conteudo) if papel == "user" else mostrar(conteudo)
+            if papel == "user":
+                st.markdown(conteudo)
+            else:
+                mostrar(conteudo)
 
     digitada = st.chat_input("Ex.: Por que o prazo de entrega é pior em São Paulo?" if com_ia
                              else "Escolha ou escreva uma das perguntas de exemplo")
     pergunta = digitada or escolhida
+    if pergunta_do_link and not st.session_state.conversa:
+        pergunta = pergunta_do_link
     if pergunta:
         st.session_state.conversa.append(("user", pergunta))
         with st.chat_message("user"):
@@ -281,11 +289,13 @@ def assistente():
                 resp = perguntar(pergunta)
             mostrar(resp)
         st.session_state.conversa.append(("assistant", resp))
-        if escolhida:
-            st.rerun()  # esconde os botões de exemplo
+        st.rerun()  # redesenha a conversa já sem os botões de exemplo
     if st.session_state.conversa and st.sidebar.button("Limpar conversa"):
         st.session_state.conversa, st.session_state.historico = [], []
         st.rerun()
 
 
-painel() if pagina.endswith("Painel") else assistente()
+if pagina.endswith("Painel"):
+    painel()
+else:
+    assistente()
