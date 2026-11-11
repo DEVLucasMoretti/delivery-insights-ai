@@ -47,7 +47,7 @@ def _sla(df):
     horas = ", ".join(f"{int(r.hora)}h ({pct(r.pct_no_prazo)})" for r in pior.itertuples())
     return (f"Os piores horários para o prazo são {horas}. "
             f"No melhor horário, {pct(df.pct_no_prazo.max())} dos pedidos chegam no prazo. "
-            "Os atrasos concentram-se nos picos de almoço e jantar: é onde reforçar a oferta de "
+            "Os atrasos se concentram nos picos de almoço e jantar: é onde reforçar a oferta de "
             "entregadores ou alargar o prazo prometido traz mais retorno.")
 
 
@@ -163,8 +163,8 @@ def responder(pergunta: str, con) -> Resposta:
     if ex is None:
         lista = "\n".join(f"- {e.pergunta}" for e in EXEMPLOS)
         return Resposta(modo="demo", modelo="sem modelo", texto=(
-            "No modo demonstração (sem chave de API) só consigo responder às perguntas do catálogo:\n\n"
-            f"{lista}\n\nPara perguntas livres, configure `ANTHROPIC_API_KEY` (veja o README)."))
+            "Essa não está no catálogo da demonstração. As que respondo aqui:\n\n"
+            f"{lista}\n\nPara perguntas livres, defina `ANTHROPIC_API_KEY` e reinicie."))
     df = db.consultar_seguro(con, ex.sql)
     passos = [Passo("executar_sql", ex.descricao, ex.sql.strip(), resultado=df)]
     if ex.grafico:

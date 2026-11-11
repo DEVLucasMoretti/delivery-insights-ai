@@ -88,6 +88,19 @@ def serie_temporal(con, f: Filtros, grao: str = "week") -> pd.DataFrame:
         FROM v_pedidos WHERE {where} GROUP BY 1 ORDER BY 1""", params)
 
 
+def serie_kpis(con, f: Filtros, grao: str = "week") -> pd.DataFrame:
+    """Indicadores principais por período, para os mini-gráficos dos cartões."""
+    assert grao in ("day", "week", "month")
+    where, params = f.where()
+    return consultar(con, f"""
+        SELECT CAST(date_trunc('{grao}', data_pedido) AS DATE) AS periodo,
+               count(*) AS pedidos,
+               sum(valor_total) FILTER (WHERE entregue) AS gmv,
+               avg(valor_total) FILTER (WHERE entregue) AS ticket_medio,
+               count(DISTINCT cliente_id) AS clientes_ativos
+        FROM v_pedidos WHERE {where} GROUP BY 1 ORDER BY 1""", params)
+
+
 def por_dimensao(con, f: Filtros, dimensao: str) -> pd.DataFrame:
     assert dimensao in ("culinaria", "cidade", "faixa_etaria", "forma_pagamento",
                         "plataforma", "canal_aquisicao")
