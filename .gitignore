@@ -8,4 +8,5 @@ data/
 .pytest_cache/
 evals/resultados/*.json
 !evals/resultados/.gitkeep
-.claude/
+.claude/*
+!.claude/skills/

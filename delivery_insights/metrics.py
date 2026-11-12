@@ -17,7 +17,7 @@ retenção, nota média nem "entregue no prazo".
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 import pandas as pd
@@ -28,7 +28,12 @@ DATA_MIN = date(2020, 12, 31)  # os primeiros pedidos de 01/01 (UTC) caem na noi
 DATA_MAX = date(2021, 4, 30)
 META_MINUTOS = 60
 
-DIMENSOES = ("cidade", "segmento", "tipo_canal", "canal", "hub", "modal_entrega", "tipo_entregador")
+DIMENSOES = ("cidade", "segmento", "tipo_canal", "canal", "hub", "modal_entrega", "tipo_entregador", "faixa_valor")
+FAIXAS_VALOR = ("Até R$ 50", "R$ 50 a 100", "R$ 100 a 200", "Acima de R$ 200")
+
+# campo do Filtros -> coluna da view v_pedidos
+COLUNAS_FILTRO = {"cidades": "cidade", "segmentos": "segmento", "tipos_canal": "tipo_canal", "canais": "canal",
+                  "hubs": "hub", "modais": "modal_entrega", "faixas_valor": "faixa_valor"}
 
 
 @dataclass(frozen=True)
@@ -37,17 +42,27 @@ class Filtros:
     fim: date = DATA_MAX
     cidades: tuple = ()
     segmentos: tuple = ()
+    tipos_canal: tuple = ()
+    canais: tuple = ()
+    hubs: tuple = ()
+    modais: tuple = ()
+    faixas_valor: tuple = ()
 
     def where(self, com_datas: bool = True) -> tuple[str, list]:
         cond, params = ["TRUE"], []
         if com_datas:
             cond.append("data_pedido BETWEEN ? AND ?")
             params += [self.inicio, self.fim]
-        for coluna, valores in (("cidade", self.cidades), ("segmento", self.segmentos)):
+        for campo, coluna in COLUNAS_FILTRO.items():
+            valores = getattr(self, campo)
             if valores:
                 cond.append(f"{coluna} IN ({', '.join('?' * len(valores))})")
                 params += list(valores)
         return " AND ".join(cond), params
+
+    def ativos(self) -> list[str]:
+        """Valores escolhidos no recorte, para mostrar como pílulas."""
+        return [v for campo in COLUNAS_FILTRO for v in getattr(self, campo)]
 
     def periodo_anterior(self) -> "Filtros | None":
         """Período imediatamente anterior, com a mesma duração (None se sair dos dados)."""
@@ -55,7 +70,7 @@ class Filtros:
         inicio = self.inicio - timedelta(days=dias)
         if inicio < DATA_MIN:
             return None
-        return Filtros(inicio, self.inicio - timedelta(days=1), self.cidades, self.segmentos)
+        return replace(self, inicio=inicio, fim=self.inicio - timedelta(days=1))
 
 
 _MEDIDAS = f"""

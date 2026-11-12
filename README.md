@@ -17,6 +17,7 @@ Prova Real é um painel de delivery com um assistente que responde a perguntas d
 |---|---|
 | **Pergunta livre** | Um agente (Claude, com *tool use*) escreve o SQL, executa, lê o erro e corrige sozinho, e pode criar um gráfico |
 | **Conta à vista** | Cada resposta traz o SQL executado e a tabela que voltou |
+| **Skill do Claude** | Pergunte aos dados direto no Claude Code, com a mesma conta à vista e o mesmo acesso só de leitura |
 | **Liga no banco da empresa** | Conecta num MySQL, faz a varredura das tabelas e das permissões, e monta o painel a partir daí |
 | **Somente leitura** | Três camadas: usuário do MySQL só com `SELECT`, validador de SQL e banco de análise sem acesso a arquivos nem à rede |
 | **Avaliação** | 18 perguntas com SQL de referência para medir a taxa de acerto, incluindo duas a que o agente deve recusar responder |
@@ -26,6 +27,8 @@ Prova Real é um painel de delivery com um assistente que responde a perguntas d
 ![Painel](docs/img/painel.png)
 
 Um número principal, três de apoio, quatro de saúde da operação e um "principal achado" calculado a partir do recorte escolhido. As abas respondem a quatro perguntas: como vão as vendas (**Resumo**), quando e como se compra (**Demanda**), por onde o pedido chega (**Canais**) e quanto tempo leva até a porta do cliente (**Entrega**).
+
+**É interativo:** o botão **Filtros** recorta o painel por cidade, segmento, tipo de canal, canal de venda, hub (centro de distribuição), modal de entrega (moto ou bicicleta) e faixa de valor do pedido. Por baixo dos gráficos há botões com os nomes de cada barra: um clique em "Rio de Janeiro", por exemplo, filtra o painel inteiro por essa cidade, e a aba aberta continua aberta.
 
 <details>
 <summary><b>Ver as outras abas</b></summary>
@@ -60,26 +63,93 @@ flowchart LR
 3. O resultado volta para o modelo. **Se a consulta falhar, ele recebe a mensagem de erro e corrige.**
 4. O ciclo repete, no máximo 8 voltas, até haver dados para responder. O código está em [`delivery_insights/agent.py`](delivery_insights/agent.py), sem framework.
 
-## Rodar em 1 minuto
+## Configuração passo a passo
 
-Precisa de Python 3.12 ou superior.
+Cada passo diz o que fazer e como saber que deu certo. Só o passo 1 e o passo 2 são obrigatórios.
+
+**Você vai precisar de:** [Python 3.12 ou superior](https://www.python.org/downloads/) e [Git](https://git-scm.com/downloads). Opcionais: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (para o MySQL) e uma [chave de API da Anthropic](https://console.anthropic.com/) (para o assistente responder perguntas livres).
+
+**1. Baixar o projeto e instalar**
 
 ```bash
 git clone https://github.com/DEVLucasMoretti/delivery-insights-ai.git
 cd delivery-insights-ai
 pip install -r requirements.txt
+```
+
+Deu certo se o último comando terminar sem mensagem de erro em vermelho.
+
+**2. Abrir o painel**
+
+```bash
 streamlit run app.py
 ```
 
-Na primeira execução o projeto baixa os dados do Kaggle (cerca de 29 MB) e guarda em `data/`. Depois abre em `http://localhost:8501`.
+Na primeira vez, o projeto baixa os dados do Kaggle (cerca de 29 MB) e guarda em `data/`. Deu certo quando o navegador abrir em `http://localhost:8501` com o título "Como vai a operação" e a etiqueta "Delivery Center · 2021" no canto.
 
-**Para ligar o agente**, copie `.env.example` para `.env` e preencha `ANTHROPIC_API_KEY`. Sem chave, tudo funciona, com o assistente em modo demonstração.
+**3. (Opcional) Ligar o assistente de IA**
+
+Copie o arquivo de exemplo e abra o `.env` num editor de texto:
 
 ```bash
-pytest                      # 56 testes, sem internet (usam uma amostra própria)
+cp .env.example .env
+```
+
+Preencha a linha `ANTHROPIC_API_KEY=` com a sua chave (sem aspas, sem espaços) e reinicie o passo 2. Deu certo se a etiqueta "Modo demonstração" sumir do cabeçalho. Sem chave, o assistente funciona com 8 perguntas prontas.
+
+**4. (Opcional) Ler os dados de um MySQL** — veja a seção [Ligar num banco MySQL](#ligar-num-banco-mysql).
+
+**Se algo der errado**
+
+| O que aparece | O que fazer |
+|---|---|
+| `streamlit: command not found` | Rode `python -m streamlit run app.py` |
+| Erro ao baixar os dados | Confira a internet, ou baixe o zip na [página do conjunto](https://www.kaggle.com/datasets/nosbielcs/brazilian-delivery-center) e extraia os 7 CSV em `data/delivery_center/` |
+| "Não consegui ler o banco de dados" | O MySQL está desligado: abra o Docker Desktop, ou apague a linha `DATABASE_URL` do `.env` para voltar aos arquivos |
+| "A chave de API não foi aceita" | Confira se copiou a chave inteira para `ANTHROPIC_API_KEY` no `.env` |
+
+Comandos para quem desenvolve:
+
+```bash
+pytest                      # 63 testes, sem internet (usam uma amostra própria)
 uvicorn api:app --reload    # API em http://localhost:8000/docs
 python -m evals.run_evals   # avaliação do agente (precisa da chave; tem custo de API)
 ```
+
+## Usar como Skill do Claude
+
+Além do painel, o projeto traz uma **Skill do Claude Code**: com ela, você pergunta aos dados direto na conversa com o Claude, e ele responde com os números e o SQL que usou, com as mesmas proteções de somente leitura do painel.
+
+**Como instalar (2 minutos)**
+
+1. Instale o [Claude Code](https://docs.anthropic.com/en/docs/claude-code) e faça os passos 1 e 2 da configuração acima.
+2. Abra o terminal **dentro da pasta do projeto** e rode `claude`.
+3. Pronto: a Skill está em [`.claude/skills/prova-real/SKILL.md`](.claude/skills/prova-real/SKILL.md) e o Claude Code carrega sozinho as skills da pasta do projeto. Para conferir, digite `/skills` e procure **prova-real** na lista.
+
+Para usar em qualquer pasta, copie a Skill para a sua pasta pessoal:
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r .claude/skills/prova-real ~/.claude/skills/
+```
+
+Nesse caso, abra o Claude Code na pasta do projeto quando for usá-la, porque a Skill roda o script `scripts/consultar.py` daqui.
+
+**Como usar:** escreva a pergunta normalmente, por exemplo:
+
+> Em que cidade a taxa de entrega cobre menos o custo do frete?
+
+> Compare o tempo de entrega de comida e de produtos em abril.
+
+O Claude lê a Skill, consulta os dados com `scripts/consultar.py` e responde com o número e o SQL. O mesmo script funciona sem o Claude:
+
+```bash
+python scripts/consultar.py esquema                                  # o que existe nos dados
+python scripts/consultar.py kpis --cidade Curitiba --segmento Comida # indicadores de um recorte
+python scripts/consultar.py sql "SELECT cidade, count(*) AS pedidos FROM v_pedidos GROUP BY 1"
+```
+
+Comandos de escrita (`DELETE`, `UPDATE`, `DROP`...) são recusados.
 
 ## Ligar num banco MySQL
 
@@ -190,7 +260,9 @@ delivery_insights/
   agent.py                  Agente (tool use, text-to-SQL)
   demo.py                   Modo demonstração sem modelo de linguagem
 evals/                      Perguntas com resposta de referência e corretor
-tests/                      56 testes (pytest), um deles com MySQL de verdade no CI
+tests/                      63 testes (pytest), um deles com MySQL de verdade no CI
+scripts/consultar.py        Consulta somente leitura pela linha de comando (usada pela Skill)
+.claude/skills/prova-real/  Skill do Claude Code
 scripts/carregar_mysql.py   Carrega o conjunto num MySQL
 docker-compose.yml          MySQL local com usuário só de leitura
 scripts/capturar_telas.py   Regenera as imagens deste README

@@ -1,6 +1,6 @@
-"""Gráficos Plotly no sistema visual "Boletim".
+"""Gráficos Plotly no visual vermelho do painel.
 
-Regras: uma cor por função (petróleo = o que se destaca, cinza = o resto), um só
+Regras: uma cor por função (vermelho = o que se destaca, cinza = o resto), um só
 eixo por gráfico, grelha horizontal discreta, valor escrito na própria barra,
 tooltip em todos. O título fica fora do gráfico (no cartão HTML), por isso as
 funções não recebem título.
@@ -11,16 +11,16 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
-PETROLEO = "#0B5D66"
-NEUTRO = "#C4C9C3"
-ESCALA = ["#EEF4F3", "#CFE3E1", "#A5CCC9", "#73B0AD", "#45928F", "#20747A", "#0B5D66", "#063F47"]
-TINTA = "#16211F"
-TINTA_2 = "#4A5653"
-MUDO = "#6B7673"
-GRELHA = "#E7E3D8"
-EIXO = "#DCD7C9"
-CLARO = "#F5F2EA"
-FONTE = '"Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
+DESTAQUE = "#EA1D2C"
+NEUTRO = "#D9D9D9"
+ESCALA = ["#FFF5F5", "#FDDDE0", "#FAB8BE", "#F58A93", "#EF5965", "#EA1D2C", "#C8101E", "#8E0A14"]
+TINTA = "#3E3E3E"
+TINTA_2 = "#5F5F5F"
+MUDO = "#757575"
+GRELHA = "#EFEFEF"
+EIXO = "#E0E0E0"
+CLARO = "#FFFFFF"
+FONTE = '"Nunito Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
 
 _MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 
@@ -69,7 +69,7 @@ def _base(fig: go.Figure, altura: int = 320) -> go.Figure:
         height=altura, margin=dict(l=0, r=24, t=8, b=0),
         showlegend=False, separators=",.",
         hoverlabel=dict(bgcolor=TINTA, bordercolor=TINTA, font=dict(family=FONTE, color=CLARO, size=12)),
-        barcornerradius=3,
+        barcornerradius=6,
     )
     fig.update_xaxes(showgrid=False, zeroline=False, linecolor=EIXO, tickfont=dict(color=MUDO, size=12),
                      automargin=True, title=None, ticks="")
@@ -81,9 +81,9 @@ def _base(fig: go.Figure, altura: int = 320) -> go.Figure:
 def _cores(valores: pd.Series, destaque: str | None) -> list[str]:
     """Todas as barras em cinza, menos a que se quer que o leitor veja primeiro."""
     if destaque not in ("max", "min") or valores.empty:
-        return [PETROLEO] * len(valores)
+        return [DESTAQUE] * len(valores)
     alvo = valores.idxmax() if destaque == "max" else valores.idxmin()
-    return [PETROLEO if i == alvo else NEUTRO for i in valores.index]
+    return [DESTAQUE if i == alvo else NEUTRO for i in valores.index]
 
 
 def serie(df: pd.DataFrame, x: str, y: str, moeda: bool = True) -> go.Figure:
@@ -91,8 +91,8 @@ def serie(df: pd.DataFrame, x: str, y: str, moeda: bool = True) -> go.Figure:
     prefixo = "R$ " if moeda else ""
     fmt = brl_curto if moeda else numero
     fig = go.Figure(go.Scatter(
-        x=df[x], y=df[y], mode="lines", line=dict(color=PETROLEO, width=2),
-        fill="tozeroy", fillcolor="rgba(11,93,102,0.06)",
+        x=df[x], y=df[y], mode="lines", line=dict(color=DESTAQUE, width=2),
+        fill="tozeroy", fillcolor="rgba(234,29,44,0.07)",
         hovertemplate=f"%{{x|%d/%m/%Y}}<br><b>{prefixo}%{{y:,.0f}}</b><extra></extra>"))
     if len(df) >= 3:
         pico, ultimo = df.loc[df[y].idxmax()], df.iloc[-1]
@@ -100,7 +100,7 @@ def serie(df: pd.DataFrame, x: str, y: str, moeda: bool = True) -> go.Figure:
         for ponto, rotulo in pontos:
             fig.add_trace(go.Scatter(
                 x=[ponto[x]], y=[ponto[y]], mode="markers+text", hoverinfo="skip",
-                marker=dict(size=8, color=PETROLEO, line=dict(color="white", width=2)),
+                marker=dict(size=8, color=DESTAQUE, line=dict(color="white", width=2)),
                 text=[f"<b>{rotulo}{fmt(ponto[y])}</b>"], textposition="top center",
                 textfont=dict(color=TINTA, size=12), cliponaxis=False))
     _base(fig, 300)
@@ -121,12 +121,12 @@ def barras_h(df: pd.DataFrame, categoria: str, valor: str, formato: str = "moeda
     fmt = _FORMATOS[formato]
     cores = _cores(d[valor], destaque)
     rotulos = [fmt(v) for v in d[valor]]
-    texto = [f"<b>{r}</b>" if c == PETROLEO and destaque else r for r, c in zip(rotulos, cores)]
+    texto = [f"<b>{r}</b>" if c == DESTAQUE and destaque else r for r, c in zip(rotulos, cores)]
     total = d[valor].sum()
     contexto = [f"{pct(v / total, 0)} do total" if formato in ("moeda", "numero") and total else ""
                 for v in d[valor]]
     fig = go.Figure(go.Bar(
-        x=d[valor], y=d[categoria], orientation="h", marker_color=cores, width=0.6,
+        x=d[valor], y=d[categoria], orientation="h", marker_color=cores, width=0.6 if len(d) > 2 else 0.4,
         text=texto, textposition="outside", textfont=dict(color=TINTA, size=12), cliponaxis=False,
         customdata=list(zip(rotulos, contexto)),
         hovertemplate="%{y}<br><b>%{customdata[0]}</b> %{customdata[1]}<extra></extra>"))
@@ -144,7 +144,7 @@ def barras_v(df: pd.DataFrame, categoria: str, valor: str, formato: str = "numer
     fmt = _FORMATOS[formato]
     cores = _cores(d[valor], destaque)
     rotulos = [fmt(v) for v in d[valor]]
-    texto = [f"<b>{r}</b>" if c == PETROLEO and destaque else r for r, c in zip(rotulos, cores)]
+    texto = [f"<b>{r}</b>" if c == DESTAQUE and destaque else r for r, c in zip(rotulos, cores)]
     fig = go.Figure(go.Bar(
         x=d[categoria], y=d[valor], marker_color=cores, width=0.55,
         text=texto, textposition="outside", textfont=dict(color=TINTA, size=12), cliponaxis=False,
@@ -187,14 +187,14 @@ def linha_hora(df: pd.DataFrame, coluna: str, referencia: float, formato: str = 
     fmt = _FORMATOS[formato]
     rotulos = [fmt(v) for v in df[coluna]]
     fig = go.Figure(go.Scatter(
-        x=df["hora"], y=df[coluna], mode="lines", line=dict(color=PETROLEO, width=2),
+        x=df["hora"], y=df[coluna], mode="lines", line=dict(color=DESTAQUE, width=2),
         customdata=list(zip(rotulos, df["pedidos"])),
         hovertemplate="%{x}h<br><b>%{customdata[0]}</b><br>%{customdata[1]:,.0f} pedidos<extra></extra>"))
     if len(df):
         pior = df.loc[df[coluna].idxmax()]
         fig.add_trace(go.Scatter(
             x=[pior["hora"]], y=[pior[coluna]], mode="markers+text", hoverinfo="skip",
-            marker=dict(size=8, color=PETROLEO, line=dict(color="white", width=2)),
+            marker=dict(size=8, color=DESTAQUE, line=dict(color="white", width=2)),
             text=[f"<b>{fmt(pior[coluna])} às {int(pior['hora'])}h</b>"],
             textposition="top center", textfont=dict(color=TINTA, size=12), cliponaxis=False))
     if referencia is not None and not pd.isna(referencia):
@@ -222,8 +222,8 @@ def do_agente(df: pd.DataFrame, tipo: str, x: str, y: str, titulo: str = "") -> 
     if tipo == "linha":
         modelo = "%{y:.1%}" if fracao else "%{y:,.2f}"
         fig = go.Figure(go.Scatter(
-            x=d[x], y=d[y], mode="lines+markers", line=dict(color=PETROLEO, width=2),
-            marker=dict(size=7, color=PETROLEO, line=dict(color="white", width=2)),
+            x=d[x], y=d[y], mode="lines+markers", line=dict(color=DESTAQUE, width=2),
+            marker=dict(size=7, color=DESTAQUE, line=dict(color="white", width=2)),
             hovertemplate=f"%{{x}}<br><b>{modelo}</b><extra></extra>"))
         _base(fig, 300)
         fig.update_yaxes(rangemode="tozero", tickformat=".0%" if fracao else None)

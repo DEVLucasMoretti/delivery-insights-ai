@@ -136,6 +136,11 @@ SELECT
         WHEN 1 THEN 'Seg' WHEN 2 THEN 'Ter' WHEN 3 THEN 'Qua' WHEN 4 THEN 'Qui'
         WHEN 5 THEN 'Sex' WHEN 6 THEN 'Sáb' ELSE 'Dom' END AS dia_semana,
     p.status = 'Finalizado'                        AS finalizado,
+    CASE WHEN p.valor IS NULL THEN NULL
+         WHEN p.valor < 50 THEN 'Até R$ 50'
+         WHEN p.valor < 100 THEN 'R$ 50 a 100'
+         WHEN p.valor < 200 THEN 'R$ 100 a 200'
+         ELSE 'Acima de R$ 200' END                AS faixa_valor,
     l.nome AS loja, l.segmento,
     h.nome AS hub, h.cidade, h.uf,
     c.nome AS canal, c.tipo AS tipo_canal,
@@ -176,6 +181,7 @@ View v_pedidos (PREFIRA ESTA): pedidos já unidos a loja, hub, canal e entrega, 
   data_pedido DATE, mes DATE (1º dia do mês), hora INTEGER (0-23),
   dia_semana VARCHAR ('Seg'..'Dom'), dia_semana_num INTEGER (1=Seg .. 7=Dom),
   finalizado BOOLEAN,
+  faixa_valor VARCHAR ('Até R$ 50','R$ 50 a 100','R$ 100 a 200','Acima de R$ 200'; NULL se valor inválido),
   loja, segmento, hub, cidade, uf, canal, tipo_canal,
   distancia_km, tentativas_entrega, modal_entrega, tipo_entregador
 

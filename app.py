@@ -26,7 +26,7 @@ from delivery_insights import FONTE_DADOS, NOME, TAGLINE, agent, charts, db, dem
 from delivery_insights.charts import brl, brl_curto, numero, pct
 from delivery_insights.metrics import DATA_MAX, DATA_MIN, Filtros
 
-st.set_page_config(page_title=NOME, page_icon=Image.new("RGB", (64, 64), ui.PETROLEO),
+st.set_page_config(page_title=NOME, page_icon=Image.new("RGB", (64, 64), ui.DESTAQUE),
                    layout="wide", initial_sidebar_state="collapsed")
 st.markdown(ui.CSS, unsafe_allow_html=True)
 
@@ -70,12 +70,50 @@ def caixa(alvo=st):
     return alvo.container(border=True, key=f"cartao_{next(_n_cartao)}")
 
 
-def cartao(titulo: str, fig=None, sub: str = "", nota: str = "", alvo=st):
-    """Cartão de gráfico: título em forma de pergunta ou conclusão, gráfico e nota de rodapé."""
+# campo do recorte: (rótulo, coluna da view, texto quando vazio)
+RECORTE = {
+    "cidades": ("Cidade", "cidade", "Todas"),
+    "segmentos": ("Segmento", "segmento", "Todos"),
+    "tipos_canal": ("Tipo de canal", "tipo_canal", "Todos"),
+    "canais": ("Canal de venda", "canal", "Todos"),
+    "hubs": ("Hub (centro de distribuição)", "hub", "Todos"),
+    "modais": ("Modal de entrega", "modal_entrega", "Todos"),
+    "faixas_valor": ("Valor do pedido", "faixa_valor", "Todas"),
+}
+CAMPO_DA_COLUNA = {coluna: campo for campo, (_, coluna, _) in RECORTE.items()}
+
+
+def _filtrar_por_chip(campo: str, chave: str):
+    """Clique num chip: soma o valor ao filtro do painel. Roda antes do script, por isso pode mexer no filtro."""
+    valor = st.session_state.get(chave)
+    if valor:
+        atuais = list(st.session_state.get(f"f_{campo}", []))
+        if valor not in atuais:
+            st.session_state[f"f_{campo}"] = atuais + [valor]
+    st.session_state[chave] = None
+
+
+def cartao(titulo: str, fig=None, sub: str = "", nota: str = "", alvo=st, filtra: str | None = None):
+    """Cartão de gráfico: título em forma de pergunta ou conclusão, gráfico e nota de rodapé.
+
+    Com `filtra` (uma coluna da view), o cartão ganha chips: clicar num deles filtra o painel inteiro.
+    """
     with caixa(alvo):
         html(ui.cartao_titulo(titulo, sub))
         if fig is not None:
-            st.plotly_chart(fig, key=f"grafico_{next(_n_cartao)}", **GRAFICO)
+            chave = f"grafico_{next(_n_cartao)}"
+            st.plotly_chart(fig, key=chave, **GRAFICO)
+            if filtra:
+                campo = CAMPO_DA_COLUNA[filtra]
+                eixo = fig.data[0].y if fig.data[0].orientation == "h" else fig.data[0].x
+                ja = set(st.session_state.get(f"f_{campo}", []))
+                opcoes_chip = [str(v) for v in reversed(list(eixo)) if str(v) not in ja]
+                if fig.data[0].orientation != "h":
+                    opcoes_chip.reverse()
+                if opcoes_chip:
+                    chip = f"chip_{chave}"
+                    st.pills("Filtrar o painel por", opcoes_chip, key=chip, selection_mode="single",
+                             on_change=_filtrar_por_chip, args=(campo, chip))
         if nota:
             html(ui.nota(nota))
 
@@ -97,32 +135,42 @@ html('<hr class="pr-filete">')
 
 
 # ----------------------------------- painel -----------------------------------
-def limpar_recorte():
-    st.session_state.update(f_periodo="Todo o período", f_cidades=[], f_segmentos=[])
+def limpar_recorte(periodo: bool = True):
+    for campo in RECORTE:
+        st.session_state[f"f_{campo}"] = []
+    if periodo:
+        st.session_state["f_periodo"] = "Todo o período"
 
 
 def recorte() -> Filtros:
     c_periodo, c_filtros, c_ativos = st.columns([6, 2, 4], vertical_alignment="center")
     periodo = c_periodo.segmented_control("Período", list(PERIODOS), default="30 dias", key="f_periodo",
                                           label_visibility="collapsed") or "30 dias"
-    with c_filtros.popover("Recorte", width="stretch"):
-        cidades = st.multiselect("Cidade", opcoes("cidade"), placeholder="Todas", key="f_cidades")
-        segmentos = st.multiselect("Segmento", opcoes("segmento"), placeholder="Todos", key="f_segmentos")
+    escolhas = {}
+    n_ativos = sum(len(st.session_state.get(f"f_{c}", [])) for c in RECORTE)
+    with c_filtros.popover(f"Filtros · {n_ativos}" if n_ativos else "Filtros", width="stretch"):
+        a, b = st.columns(2)
+        for i, (campo, (rotulo, coluna, vazio)) in enumerate(RECORTE.items()):
+            alvo = a if i % 2 == 0 else b
+            escolhas[campo] = tuple(alvo.multiselect(rotulo, opcoes(coluna), placeholder=vazio, key=f"f_{campo}"))
         inicio, fim = DATA_MIN, DATA_MAX
         if periodo == "Escolher datas":
             datas = st.date_input("Datas", (DATA_MIN, DATA_MAX), min_value=DATA_MIN, max_value=DATA_MAX,
                                   format="DD/MM/YYYY")
             if len(datas) == 2:
                 inicio, fim = datas
-        st.caption(f"Os últimos dias contam até {DATA_MAX:%d/%m/%Y}, último dia dos dados.")
+        st.caption(f"Os últimos dias contam até {DATA_MAX:%d/%m/%Y}, último dia dos dados. "
+                   "Dica: os botões por baixo dos gráficos também filtram o painel.")
+        if n_ativos:
+            st.button("Limpar filtros", on_click=limpar_recorte, args=(False,), width="stretch")
     dias = PERIODOS[periodo]
     if dias:
         inicio = DATA_MAX - timedelta(days=dias - 1)
-    ativos = [(c, True) for c in cidades] + [(c, True) for c in segmentos]
-    if ativos:
+    f = Filtros(inicio, fim, **escolhas)
+    if f.ativos():
         with c_ativos:
-            html(ui.pilulas(ativos))
-    return Filtros(inicio, fim, tuple(cidades), tuple(segmentos))
+            html(ui.pilulas([(v, True) for v in f.ativos()]))
+    return f
 
 
 def variacao(atual: dict, anterior: dict | None, chave: str, comparacao: str,
@@ -217,7 +265,7 @@ def aba_resumo(f: Filtros, k: dict):
     cartao(f"Como as vendas andaram, {'dia a dia' if grao == 'day' else 'semana a semana'}?",
            charts.serie(s, "periodo", "gmv"), sub="Vendas (GMV) em reais, pedidos finalizados")
     a, b = st.columns(2)
-    cartao("Onde está a venda?", alvo=a, sub="Vendas (GMV) por cidade",
+    cartao("Onde está a venda?", alvo=a, filtra="cidade", sub="Vendas (GMV) por cidade",
            fig=charts.barras_h(metrics.por_dimensao(con, f, "cidade"), "cidade", "gmv"))
     seg = metrics.por_dimensao(con, f, "segmento")
     titulo = "Comida ou produtos?"
@@ -225,7 +273,7 @@ def aba_resumo(f: Filtros, k: dict):
         c = seg.set_index("segmento").loc["Comida"]
         titulo = (f"Comida faz {pct(c['participacao'], 0)} dos pedidos e "
                   f"{pct(c['gmv'] / seg['gmv'].sum(), 0)} das vendas")
-    cartao(titulo, alvo=b, sub="Vendas (GMV) por segmento",
+    cartao(titulo, alvo=b, filtra="segmento", sub="Vendas (GMV) por segmento",
            fig=charts.barras_h(seg, "segmento", "gmv"))
     with caixa():
         html(ui.cartao_titulo("As lojas que mais vendem", "As 10 primeiras em vendas no período"))
@@ -244,7 +292,7 @@ def aba_demanda(f: Filtros, k: dict):
     cartao("Quando o pedido acontece?", charts.calor_hora_dia(mapa),
            sub=f"Pedidos por dia da semana e hora (Brasília) · pico: {pico['dia_semana']} às {int(pico['hora'])}h")
     a, b = st.columns(2)
-    cartao("Onde o ticket é mais alto?", alvo=a, sub="Ticket médio por cidade",
+    cartao("Onde o ticket é mais alto?", alvo=a, filtra="cidade", sub="Ticket médio por cidade",
            fig=charts.barras_h(metrics.por_dimensao(con, f, "cidade"), "cidade", "ticket_medio", formato="moeda"))
     pg = metrics.pagamentos(con, f)
     titulo = "Como se paga?"
@@ -252,7 +300,15 @@ def aba_demanda(f: Filtros, k: dict):
         titulo = f"{pct(pg['participacao'].iloc[0], 0)} do valor é pago por {pg['metodo'].iloc[0].lower()}"
     cartao(titulo, alvo=b, sub="Participação de cada método no valor pago",
            fig=charts.barras_h(pg, "metodo", "participacao", formato="pct"))
-    cartao("Que hubs concentram a venda?", sub="Vendas (GMV) dos 10 maiores hubs", nota=NOTA_NOMES,
+    fx = metrics.por_dimensao(con, f, "faixa_valor")
+    fx = fx.set_index("faixa_valor").reindex(metrics.FAIXAS_VALOR).dropna(subset=["pedidos"]).reset_index()
+    titulo = "Quanto se gasta por pedido?"
+    if len(fx):
+        maior = fx.loc[fx["pedidos"].idxmax()]
+        titulo = f"{pct(maior['participacao'], 0)} dos pedidos ficam na faixa {maior['faixa_valor'].lower()}"
+    cartao(titulo, filtra="faixa_valor", sub="Pedidos por faixa de valor",
+           fig=charts.barras_v(fx, "faixa_valor", "pedidos", formato="numero"))
+    cartao("Que hubs concentram a venda?", filtra="hub", sub="Vendas (GMV) dos 10 maiores hubs", nota=NOTA_NOMES,
            fig=charts.barras_h(metrics.por_dimensao(con, f, "hub", 10), "hub", "gmv"))
     html(ui.link_pergunta("Em que horário chegam mais pedidos?"))
 
@@ -264,14 +320,14 @@ def aba_canais(f: Filtros, k: dict):
     if len(tipo):
         maior = tipo.loc[tipo["pedidos"].idxmax()]
         titulo = f"{pct(maior['participacao'], 0)} dos pedidos vêm de {maior['tipo_canal'].lower()}"
-    cartao(titulo, alvo=a, sub="Pedidos por tipo de canal",
+    cartao(titulo, alvo=a, filtra="tipo_canal", sub="Pedidos por tipo de canal",
            fig=charts.barras_h(tipo, "tipo_canal", "pedidos", formato="numero"))
-    cartao("Onde o ticket é maior?", alvo=b, sub="Ticket médio por tipo de canal",
+    cartao("Onde o ticket é maior?", alvo=b, filtra="tipo_canal", sub="Ticket médio por tipo de canal",
            fig=charts.barras_h(tipo, "tipo_canal", "ticket_medio", formato="moeda"))
     a, b = st.columns(2)
-    cartao("Que canais vendem mais?", alvo=a, sub="Vendas (GMV) dos 10 maiores canais", nota=NOTA_NOMES,
+    cartao("Que canais vendem mais?", alvo=a, filtra="canal", sub="Vendas (GMV) dos 10 maiores canais", nota=NOTA_NOMES,
            fig=charts.barras_h(metrics.por_dimensao(con, f, "canal", 10), "canal", "gmv"))
-    cartao("Em que canal o pedido chega mais rápido?", alvo=b, sub="Pedidos finalizados em até 60 minutos",
+    cartao("Em que canal o pedido chega mais rápido?", alvo=b, filtra="tipo_canal", sub="Pedidos finalizados em até 60 minutos",
            fig=charts.barras_h(tipo, "tipo_canal", "pct_ate_60", formato="pct", destaque="min"),
            nota="O canal próprio vende mais produtos, que demoram mais do que comida.")
     html(ui.link_pergunta("Marketplace ou canal próprio: onde o ticket é maior?"))
@@ -298,7 +354,7 @@ def aba_entrega(f: Filtros, k: dict):
            nota="Só horas com pelo menos 1% dos pedidos do recorte.")
     a, b = st.columns(2)
     modal = metrics.por_dimensao(con, f, "modal_entrega")
-    cartao("Moto ou bicicleta?", alvo=a, sub="Distância mediana de cada modal",
+    cartao("Moto ou bicicleta?", alvo=a, filtra="modal_entrega", sub="Distância mediana de cada modal",
            fig=charts.barras_h(modal, "modal_entrega", "distancia_mediana_km", formato="km"),
            nota=" · ".join(f"{r.modal_entrega}: {pct(r.participacao, 0)} das entregas" for r in modal.itertuples()))
     dist = metrics.distancia_vs_transito(con, f)
@@ -306,11 +362,11 @@ def aba_entrega(f: Filtros, k: dict):
            fig=charts.barras_v(dist, "distancia", "transito_mediano_min", formato="minutos"))
     cid = metrics.por_dimensao(con, f, "cidade")
     a, b = st.columns(2)
-    cartao("Onde o pedido demora mais?", alvo=a, sub="Tempo total mediano por cidade",
+    cartao("Onde o pedido demora mais?", alvo=a, filtra="cidade", sub="Tempo total mediano por cidade",
            fig=charts.barras_h(cid, "cidade", "tempo_mediano_min", formato="minutos"))
-    cartao("Onde a taxa não paga a entrega?", alvo=b, sub="Taxa cobrada sobre o custo da entrega, por cidade",
+    cartao("Onde a taxa não paga a entrega?", alvo=b, filtra="cidade", sub="Taxa cobrada sobre o custo da entrega, por cidade",
            fig=charts.barras_h(cid, "cidade", "frete_coberto", formato="pct", destaque="min"))
-    cartao("Onde se cancela mais?", sub="Taxa de cancelamento por cidade",
+    cartao("Onde se cancela mais?", filtra="cidade", sub="Taxa de cancelamento por cidade",
            fig=charts.barras_h(cid, "cidade", "taxa_cancelamento", formato="pct"))
     html(ui.link_pergunta("Onde a taxa de entrega não cobre o custo?"))
 
@@ -332,7 +388,7 @@ def painel():
         html(ui.achado(frase))
     aba_do_link = st.query_params.get("aba", "").lower()  # ?aba=entrega abre direto nessa aba
     inicial = next((a for a in ABAS if a.lower().startswith(aba_do_link)), None) if aba_do_link else None
-    for aba, desenhar in zip(st.tabs(ABAS, default=inicial),
+    for aba, desenhar in zip(st.tabs(ABAS, default=inicial, key="aba_ativa"),
                              (aba_resumo, aba_demanda, aba_canais, aba_entrega)):
         with aba:
             desenhar(f, k)
